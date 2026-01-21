@@ -168,6 +168,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: .github/claude-security-reports/pr-${{ github.event.pull_request.number }}-findings.sarif
+          category: Claude-Security-Review
 ```
 
 Notes:

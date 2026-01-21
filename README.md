@@ -55,7 +55,7 @@ This action scans your entire codebase and should only be used in trusted reposi
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `branch` | Branch to scan (defaults to repository default branch) | repository default | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
-| `claude-model` | Claude [model name](https://docs.anthropic.com/en/docs/about-claude/models/overview#model-names) to use. Defaults to Opus 4.1. | `claude-opus-4-1-20250805` | No |
+| `claude-model` | Claude [model name](https://docs.anthropic.com/en/docs/about-claude/models/overview#model-names) to use. Defaults to latest Sonnet 4.5. | `claude-sonnet-4-5` | No |
 | `claudecode-timeout` | Timeout for ClaudeCode analysis in minutes | `20` | No |
 | `false-positive-filtering-instructions` | Path to custom false positive filtering instructions text file | None | No |
 | `custom-security-scan-instructions` | Path to custom security scan instructions text file to append to audit prompt | None | No |

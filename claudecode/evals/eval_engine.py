@@ -26,7 +26,7 @@ TIMEOUT_CLAUDECODE = 1800
 class EvalCase:
     """Single evaluation test case."""
     repo_name: str
-    pr_number: int
+    branch: str = "main"
     description: str = ""
 
 
@@ -34,7 +34,7 @@ class EvalCase:
 class EvalResult:
     """Result of a single evaluation."""
     repo_name: str
-    pr_number: int
+    branch: str
     description: str
     
     # Evaluation results
@@ -204,22 +204,22 @@ class EvaluationEngine:
         Returns:
             Branch name for the evaluation
         """
-        # Create a safe branch name from repo and PR
+        # Create a safe branch name from repo and branch
         safe_repo = test_case.repo_name.replace('/', '-').replace('.', '-')
         timestamp = time.strftime('%Y%m%d-%H%M%S')
-        return f"eval-pr-{safe_repo}-{test_case.pr_number}-{timestamp}"
+        return f"eval-{safe_repo}-{test_case.branch}-{timestamp}"
     
     def _setup_repository(self, test_case: EvalCase) -> Tuple[bool, str, str]:
-        """Set up repository worktree for PR evaluation.
+        """Set up repository worktree for evaluation.
         
         Args:
-            test_case: Test case containing repo and PR info
+            test_case: Test case containing repo and branch info
             
         Returns:
             Tuple of (success, worktree_path, error_message)
         """
         repo_name = test_case.repo_name
-        pr_number = test_case.pr_number
+        branch = test_case.branch
         
         # Create base path for this repository
         safe_repo_name = repo_name.replace('/', '_')
@@ -245,23 +245,23 @@ class EvaluationEngine:
                     return False, "", error_msg
             
             # Clean up any stale worktrees for this evaluation
-            eval_branch_prefix = f"eval-pr-{safe_repo_name}-{pr_number}"
+            eval_branch_prefix = f"eval-{safe_repo_name}-{branch}"
             self._clean_worktrees(base_repo_path, eval_branch_prefix)
             
             # Create worktree for this specific evaluation
             eval_branch = self._get_eval_branch_name(test_case)
-            worktree_path = os.path.join(self.work_dir, f"{safe_repo_name}_pr{pr_number}_{int(time.time())}")
+            worktree_path = os.path.join(self.work_dir, f"{safe_repo_name}_{branch}_{int(time.time())}")
             
             try:
-                # Fetch the PR
-                self.log(f"Fetching PR #{pr_number} from {repo_name}")
-                subprocess.run(['git', '-C', base_repo_path, 'fetch', 'origin', f'pull/{pr_number}/head'],
+                # Fetch the branch
+                self.log(f"Fetching branch '{branch}' from {repo_name}")
+                subprocess.run(['git', '-C', base_repo_path, 'fetch', 'origin', f'{branch}:{branch}'],
                              check=True, capture_output=True, timeout=TIMEOUT_FETCH)
                 
-                # Create new worktree with PR changes
+                # Create new worktree with branch content
                 self.log(f"Creating worktree at {worktree_path}")
                 subprocess.run(['git', '-C', base_repo_path, 'worktree', 'add', '-b', eval_branch, 
-                              worktree_path, 'FETCH_HEAD'],
+                              worktree_path, f'origin/{branch}'],
                              check=True, capture_output=True, timeout=TIMEOUT_WORKTREE_CREATE)
                 
                 return True, worktree_path, ""
@@ -315,7 +315,7 @@ class EvaluationEngine:
                 self.log(f"Error cleaning up worktree: {e}")
     
     def run_evaluation(self, test_case: EvalCase) -> EvalResult:
-        """Run security evaluation on a single PR.
+        """Run security evaluation on a single repository branch.
         
         Args:
             test_case: Test case to evaluate
@@ -324,14 +324,14 @@ class EvaluationEngine:
             EvalResult with evaluation outcome
         """
         start_time = time.time()
-        self.log(f"Starting evaluation of {test_case.repo_name}#{test_case.pr_number}")
+        self.log(f"Starting evaluation of {test_case.repo_name} branch '{test_case.branch}'")
         
         # Set up repository
         success, worktree_path, error_msg = self._setup_repository(test_case)
         if not success:
             return EvalResult(
                 repo_name=test_case.repo_name,
-                pr_number=test_case.pr_number,
+                branch=test_case.branch,
                 description=test_case.description,
                 success=False,
                 runtime_seconds=time.time() - start_time,
@@ -348,7 +348,7 @@ class EvaluationEngine:
             if not audit_success:
                 return EvalResult(
                     repo_name=test_case.repo_name,
-                    pr_number=test_case.pr_number,
+                    branch=test_case.branch,
                     description=test_case.description,
                     success=False,
                     runtime_seconds=time.time() - start_time,
@@ -379,7 +379,7 @@ class EvaluationEngine:
             
             return EvalResult(
                 repo_name=test_case.repo_name,
-                pr_number=test_case.pr_number,
+                branch=test_case.branch,
                 description=test_case.description,
                 success=True,
                 runtime_seconds=time.time() - start_time,
@@ -406,7 +406,6 @@ class EvaluationEngine:
         # Prepare environment
         env = os.environ.copy()
         env['GITHUB_REPOSITORY'] = test_case.repo_name
-        env['PR_NUMBER'] = str(test_case.pr_number)
         env['ANTHROPIC_API_KEY'] = self.claude_api_key
         if self.github_token:
             env['GITHUB_TOKEN'] = self.github_token
@@ -423,7 +422,7 @@ class EvaluationEngine:
             env['PYTHONPATH'] = str(project_root)
         
         try:
-            self.log(f"Executing SAST audit for PR #{test_case.pr_number}")
+            self.log(f"Executing SAST audit for {test_case.repo_name} branch '{test_case.branch}'")
             result = subprocess.run(
                 [sys.executable, str(script_path)],
                 cwd=repo_path,

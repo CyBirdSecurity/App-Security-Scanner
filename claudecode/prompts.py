@@ -1,36 +1,24 @@
 """Security audit prompt templates."""
 
-def get_security_audit_prompt(pr_data, pr_diff=None, include_diff=True, custom_scan_instructions=None):
+def get_security_audit_prompt(repo_data=None, custom_scan_instructions=None):
     """Generate security audit prompt for Claude Code.
     
     Args:
-        pr_data: PR data dictionary from GitHub API
-        pr_diff: Optional complete PR diff in unified format
-        include_diff: Whether to include the diff in the prompt (default: True)
+        repo_data: Repository data dictionary (optional, for context)
         custom_scan_instructions: Optional custom security categories to append
         
     Returns:
         Formatted prompt string
     """
     
-    files_changed = "\n".join([f"- {f['filename']}" for f in pr_data['files']])
-    
-    # Add diff section if provided and include_diff is True
-    diff_section = ""
-    if pr_diff and include_diff:
-        diff_section = f"""
-
-PR DIFF CONTENT:
-```
-{pr_diff}
-```
-
-Review the complete diff above. This contains all code changes in the PR.
-"""
-    elif pr_diff and not include_diff:
-        diff_section = """
-
-NOTE: PR diff was omitted due to size constraints. Please use the file exploration tools to examine the specific files that were changed in this PR.
+    # Repository context if provided
+    repo_context = ""
+    if repo_data:
+        repo_context = f"""
+REPOSITORY CONTEXT:
+- Repository: {repo_data.get('full_name', 'unknown')}
+- Primary Language: {repo_data.get('language', 'unknown')}
+- Description: {repo_data.get('description', 'N/A')}
 """
     
     # Add custom security categories if provided
@@ -39,20 +27,10 @@ NOTE: PR diff was omitted due to size constraints. Please use the file explorati
         custom_categories_section = f"\n{custom_scan_instructions}\n"
     
     return f"""
-You are a senior security engineer conducting a focused security review of GitHub PR #{pr_data['number']}: "{pr_data['title']}"
-
-CONTEXT:
-- Repository: {pr_data.get('head', {}).get('repo', {}).get('full_name', 'unknown')}
-- Author: {pr_data['user']}
-- Files changed: {pr_data['changed_files']}
-- Lines added: {pr_data['additions']}
-- Lines deleted: {pr_data['deletions']}
-
-Files modified:
-{files_changed}{diff_section}
-
+You are a senior security engineer conducting a comprehensive security audit of an entire application codebase.
+{repo_context}
 OBJECTIVE:
-Perform a security-focused code review to identify HIGH-CONFIDENCE security vulnerabilities that could have real exploitation potential. This is not a general code review - focus ONLY on security implications newly added by this PR. Do not comment on existing security concerns.
+Perform a thorough security analysis to identify HIGH-CONFIDENCE security vulnerabilities across the entire codebase that could have real exploitation potential. This is a comprehensive security audit - examine all code for potential security issues including both new and existing vulnerabilities.
 
 CRITICAL INSTRUCTIONS:
 1. MINIMIZE FALSE POSITIVES: Only flag issues where you're >80% confident of actual exploitability
@@ -79,6 +57,12 @@ SECURITY CATEGORIES TO EXAMINE:
 - Session management flaws
 - JWT token vulnerabilities
 - Authorization logic bypasses
+- GraphQL field-level authorization bypass (resolvers missing permission checks)
+- GraphQL query-level authorization bypass (missing authentication on queries/mutations)
+- GraphQL object-level authorization bypass (resolvers not verifying user access to specific resources)
+- GraphQL nested object authorization bypass (missing auth checks on relationships)
+- GraphQL subscription authorization bypass (real-time subscriptions missing auth)
+- GraphQL batch query authorization bypass (batch operations bypassing per-request checks)
 
 **Crypto & Secrets Management:**
 - Hardcoded API keys, passwords, or tokens
@@ -99,29 +83,49 @@ SECURITY CATEGORIES TO EXAMINE:
 - PII handling violations
 - API endpoint data leakage
 - Debug information exposure
+- GraphQL introspection enabled in production (schema exposure)
+- GraphQL error message leakage (detailed database/system errors in responses)
+- GraphQL debugging info in production (development-only fields/resolvers accessible)
+- Missing field-level security on sensitive GraphQL data (PII accessible without authorization)
+- GraphQL cursor/pagination token exposure (revealing internal system information)
+
+**GraphQL-Specific Security Issues:**
+- GraphQL injection via variables (unsanitized GraphQL variables leading to injection)
+- GraphQL query whitelisting bypass (production not enforcing approved query patterns)
+- GraphQL alias abuse (queries using aliases to bypass rate limiting/access controls)
+- Missing context propagation in GraphQL (user context not passed through resolver chain)
+- Overprivileged GraphQL resolvers (resolvers with excessive database/system access)
+- Exposed GraphQL admin operations (administrative mutations/queries accessible to non-admins)
+- GraphQL union/interface authorization bypass (missing type-specific authorization)
+- GraphQL directive authorization bypass (custom directives not enforcing security rules)
+- Apollo Server authorization bypass (missing context validation or directive usage)
+- Prisma GraphQL authorization gaps (database queries not filtered by user permissions)
+- Hasura authorization misconfiguration (row-level security rules missing/misconfigured)
+- GraphQL federation service authorization gaps (federated services not validating cross-service permissions)
 {custom_categories_section}
 Additional notes:
 - Even if something is only exploitable from the local network, it can still be a HIGH severity issue
 
 ANALYSIS METHODOLOGY:
 
-Phase 1 - Repository Context Research (Use file search tools):
-- Identify existing security frameworks and libraries in use
-- Look for established secure coding patterns in the codebase
-- Examine existing sanitization and validation patterns
-- Understand the project's security model and threat model
+Phase 1 - Repository Discovery and Architecture Analysis:
+- Use file search and exploration tools to understand the application structure
+- Identify key components: web frameworks, databases, authentication systems, APIs
+- Map data flow patterns and identify entry points for user input
+- Discover configuration files, environment variables, and deployment scripts
 
-Phase 2 - Comparative Analysis:
-- Compare new code changes against existing security patterns
-- Identify deviations from established secure practices
-- Look for inconsistent security implementations
-- Flag code that introduces new attack surfaces
+Phase 2 - Security Framework Assessment:
+- Identify existing security libraries, frameworks, and patterns in use
+- Examine authentication and authorization implementations
+- Review input validation and sanitization approaches
+- Assess cryptographic implementations and key management
 
-Phase 3 - Vulnerability Assessment:
-- Examine each modified file for security implications
-- Trace data flow from user inputs to sensitive operations
-- Look for privilege boundaries being crossed unsafely
-- Identify injection points and unsafe deserialization
+Phase 3 - Comprehensive Vulnerability Analysis:
+- Systematically examine all source code files for security vulnerabilities
+- Focus on high-risk areas: authentication, authorization, data handling, external integrations
+- Trace data flows from all input sources to sensitive operations
+- Identify injection points, unsafe deserialization, and privilege escalation paths
+- Review configuration and deployment files for security misconfigurations
 
 REQUIRED OUTPUT FORMAT:
 
@@ -132,7 +136,7 @@ You MUST output your findings as structured JSON with this exact schema:
     {{
       "file": "path/to/file.py",
       "line": 42,
-      "severity": "HIGH",
+      "severity": "CRITICAL",
       "category": "sql_injection",
       "description": "User input passed to SQL query without parameterization",
       "exploit_scenario": "Attacker could extract database contents by manipulating the 'search' parameter with SQL injection payloads like '1; DROP TABLE users--'",
@@ -142,7 +146,8 @@ You MUST output your findings as structured JSON with this exact schema:
   ],
   "analysis_summary": {{
     "files_reviewed": 8,
-    "high_severity": 1,
+    "critical_severity": 1,
+    "high_severity": 0,
     "medium_severity": 0,
     "low_severity": 0,
     "review_completed": true,
@@ -150,6 +155,7 @@ You MUST output your findings as structured JSON with this exact schema:
 }}
 
 SEVERITY GUIDELINES:
+- **CRITICAL**: Immediate sensitive data disclosure vulnerabilities requiring urgent attention (PII exposure, hardcoded secrets in production, authentication bypass allowing full admin access, direct database exposure)
 - **HIGH**: Directly exploitable vulnerabilities leading to RCE, data breach, or authentication bypass
 - **MEDIUM**: Vulnerabilities requiring specific conditions but with significant impact
 - **LOW**: Defense-in-depth issues or lower-impact vulnerabilities
@@ -161,7 +167,7 @@ CONFIDENCE SCORING:
 - Below 0.7: Don't report (too speculative)
 
 FINAL REMINDER:
-Focus on HIGH and MEDIUM findings only. Better to miss some theoretical issues than flood the report with false positives. Each finding should be something a security engineer would confidently raise in a PR review.
+Focus on CRITICAL, HIGH and MEDIUM findings only. CRITICAL findings involving sensitive data disclosure must never be filtered out. Better to miss some theoretical issues than flood the report with false positives. Each finding should be something a security engineer would confidently raise in a PR review.
 
 IMPORTANT EXCLUSIONS - DO NOT REPORT:
 - Denial of Service (DOS) vulnerabilities or resource exhaustion attacks
@@ -170,7 +176,7 @@ IMPORTANT EXCLUSIONS - DO NOT REPORT:
 - Memory consumption or CPU exhaustion issues.
 - Lack of input validation on non-security-critical fields. If there isn't a proven problem from a lack of input validation, don't report it.
 
-Begin your analysis now. Use the repository exploration tools to understand the codebase context, then analyze the PR changes for security implications.
+Begin your comprehensive security analysis now. Use the repository exploration tools to systematically examine the entire codebase for security vulnerabilities.
 
 Your final reply must contain the JSON and nothing else. You should not reply again after outputting the JSON.
 """

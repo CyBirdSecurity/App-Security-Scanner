@@ -8,7 +8,9 @@ def _severity_to_level(severity: str) -> str:
     if not severity:
         return "note"
     s = severity.strip().upper()
-    if s == "HIGH" or s == "CRITICAL":
+    if s == "CRITICAL":
+        return "error"
+    if s == "HIGH":
         return "error"
     if s == "MEDIUM":
         return "warning"

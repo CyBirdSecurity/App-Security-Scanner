@@ -1,10 +1,10 @@
-name: 'Claude Code Security Reviewer'
-description: 'AI-powered security review GitHub Action using Claude to analyze code changes for security vulnerabilities'
+name: 'Claude Code Security Scanner'
+description: 'AI-powered comprehensive security scanner using Claude to analyze entire application codebases for security vulnerabilities'
 author: 'Anthropic'
 
 inputs:
-  comment-pr:
-    description: 'Whether to comment on PRs with findings'
+  create-issue:
+    description: 'Whether to create or update GitHub issues with findings'
     required: false
     default: 'true'
   
@@ -33,10 +33,10 @@ inputs:
     required: false
     default: ''
 
-  run-every-commit:
-    description: 'Run ClaudeCode on every commit (skips cache check). Warning: This may lead to more false positives on PRs with many commits as the AI analyzes the same code multiple times.'
+  branch:
+    description: 'Branch to scan (defaults to repository default branch)'
     required: false
-    default: 'false'
+    default: ''
 
   false-positive-filtering-instructions:
     description: 'Path to custom false positive filtering instructions text file'
@@ -73,89 +73,22 @@ runs:
       with:
         python-version: '3.x'
     
-    - name: Check ClaudeCode run history
-      id: claudecode-history
-      if: github.event_name == 'pull_request'
-      uses: actions/cache@v4
-      with:
-        path: .claudecode-marker
-        key: claudecode-${{ github.repository_id }}-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
-        restore-keys: |
-          claudecode-${{ github.repository_id }}-pr-${{ github.event.pull_request.number }}-
-    
-    - name: Determine ClaudeCode enablement
-      id: claudecode-check
+    - name: Determine scan branch
+      id: scan-branch
       shell: bash
       env:
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        RUN_EVERY_COMMIT: ${{ inputs.run-every-commit }}
+        INPUT_BRANCH: ${{ inputs.branch }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
       run: |
-        # Check if ClaudeCode should be enabled
-        ENABLE_CLAUDECODE="true"
-        SILENCE_CLAUDECODE_COMMENTS="false"
-        
-        # For PRs, check sampling and cache
-        if [ "${{ github.event_name }}" == "pull_request" ]; then
-          PR_NUMBER="$PR_NUMBER"
-          CACHE_HIT="${{ steps.claudecode-history.outputs.cache-hit }}"
-
-          # Now check cache - if ClaudeCode has already run, disable unless run-every-commit is true
-          # Check if marker file exists (cache may have been restored from a different SHA)
-          if [ "$RUN_EVERY_COMMIT" != "true" ] && [ -f ".claudecode-marker/marker.json" ]; then
-            echo "ClaudeCode has already run on PR #$PR_NUMBER (found marker file), forcing disable to avoid false positives"
-            ENABLE_CLAUDECODE="false"
-          elif [ "$RUN_EVERY_COMMIT" == "true" ] && [ -f ".claudecode-marker/marker.json" ]; then
-            echo "ClaudeCode has already run on PR #$PR_NUMBER but run-every-commit is enabled, running again"
-          elif [ "$ENABLE_CLAUDECODE" == "true" ]; then
-            echo "ClaudeCode will run for PR #$PR_NUMBER (first run)"
-          fi
-        fi
-        
-        echo "enable_claudecode=$ENABLE_CLAUDECODE" >> $GITHUB_OUTPUT
-        echo "silence_claudecode_comments=$SILENCE_CLAUDECODE_COMMENTS" >> $GITHUB_OUTPUT
-        
-        if [ "$ENABLE_CLAUDECODE" == "true" ]; then
-          echo "ClaudeCode is enabled for this run"
+        if [ -n "$INPUT_BRANCH" ]; then
+          echo "scan_branch=$INPUT_BRANCH" >> $GITHUB_OUTPUT
+          echo "Scanning branch: $INPUT_BRANCH (user specified)"
         else
-          echo "ClaudeCode is disabled for this run"
+          echo "scan_branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
+          echo "Scanning branch: $DEFAULT_BRANCH (repository default)"
         fi
-    
-    - name: Reserve ClaudeCode slot to prevent race conditions
-      if: steps.claudecode-check.outputs.enable_claudecode == 'true' && github.event_name == 'pull_request'
-      shell: bash
-      env:
-        REPOSITORY_ID: ${{ github.repository_id }}
-        REPOSITORY: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        SHA: ${{ github.sha }}
-        RUN_ID: ${{ github.run_id }}
-        RUN_NUMBER: ${{ github.run_number }}
-      run: |
-        # Create a reservation marker immediately to prevent other concurrent runs
-        mkdir -p .claudecode-marker
-        cat > .claudecode-marker/marker.json << EOF
-        {
-          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-          "repository_id": "$REPOSITORY_ID",
-          "repository": "$REPOSITORY",
-          "pr_number": $PR_NUMBER,
-          "sha": "$SHA",
-          "status": "reserved",
-          "run_id": "$RUN_ID",
-          "run_number": "$RUN_NUMBER"
-        }
-        EOF
-        echo "Created ClaudeCode reservation marker for PR #$PR_NUMBER"
-    
-    - name: Save ClaudeCode reservation to cache
-      if: steps.claudecode-check.outputs.enable_claudecode == 'true' && github.event_name == 'pull_request'
-      uses: actions/cache/save@v4
-      with:
-        path: .claudecode-marker
-        key: claudecode-${{ github.repository_id }}-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
     
     - name: Set up Node.js
-      if: steps.claudecode-check.outputs.enable_claudecode == 'true'
       uses: actions/setup-node@v4
       with:
         node-version: '18'
@@ -166,21 +99,23 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         echo "::group::Install Deps"
-        if [ "${{ steps.claudecode-check.outputs.enable_claudecode }}" == "true" ]; then
-          pip install -r "$ACTION_PATH/claudecode/requirements.txt"
-          npm install -g @anthropic-ai/claude-code
-        fi
+        pip install -r "$ACTION_PATH/claudecode/requirements.txt"
+        npm install -g @anthropic-ai/claude-code
         sudo apt-get update && sudo apt-get install -y jq
         echo "::endgroup::"
     
-    - name: Run ClaudeCode scan
+    - name: Checkout target branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.scan-branch.outputs.scan_branch }}
+        fetch-depth: 0
+    
+    - name: Run Claude Security Scanner
       id: claudecode-scan
-      if: steps.claudecode-check.outputs.enable_claudecode == 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
         ANTHROPIC_API_KEY: ${{ inputs.claude-api-key }}
         ENABLE_CLAUDE_FILTERING: 'true' 
         EXCLUDE_DIRECTORIES: ${{ inputs.exclude-directories }}
@@ -189,19 +124,16 @@ runs:
         CLAUDE_MODEL: ${{ inputs.claude-model }}
         CLAUDECODE_TIMEOUT: ${{ inputs.claudecode-timeout }}
         ACTION_PATH: ${{ github.action_path }}
+        SCAN_BRANCH: ${{ steps.scan-branch.outputs.scan_branch }}
       run: |
-        echo "Running ClaudeCode AI security analysis..."
+        echo "Running Claude AI comprehensive security analysis..."
+        echo "Repository: $GITHUB_REPOSITORY"
+        echo "Branch: $SCAN_BRANCH"
         echo "----------------------------------------"
         
         # Initialize outputs
         echo "findings_count=0" >> $GITHUB_OUTPUT
         echo "results_file=claudecode/claudecode-results.json" >> $GITHUB_OUTPUT
-        
-        # Skip ClaudeCode if not a PR
-        if [ "${{ github.event_name }}" != "pull_request" ]; then
-          echo "ClaudeCode only runs on pull requests, skipping"
-          exit 0
-        fi
         
         # Validate API key is provided
         if [ -z "$ANTHROPIC_API_KEY" ]; then
@@ -227,7 +159,7 @@ runs:
         echo "Claude CLI version: $(claude --version 2>&1 || echo 'Claude CLI not found')"
         echo "ANTHROPIC_API_KEY set: $(if [ -n "$ANTHROPIC_API_KEY" ]; then echo 'Yes'; else echo 'No'; fi)"
         echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
-        echo "PR_NUMBER: $PR_NUMBER"
+        echo "SCAN_BRANCH: $SCAN_BRANCH"
         echo "Python path: $PYTHONPATH"
         echo "Files in claudecode directory:"
         ls -la claudecode/
@@ -317,16 +249,44 @@ runs:
         retention-days: 7
         if-no-files-found: ignore
     
-    - name: Comment PR with findings
-      if: github.event_name == 'pull_request' && inputs.comment-pr == 'true' && steps.claudecode-check.outputs.enable_claudecode == 'true'
+    - name: Create or update security issue
+      if: inputs.create-issue == 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
         CLAUDECODE_FINDINGS: ${{ steps.claudecode-scan.outputs.findings_count }}
-        SILENCE_CLAUDECODE_COMMENTS: ${{ steps.claudecode-check.outputs.silence_claudecode_comments }}
-        ACTION_PATH: ${{ github.action_path }}
+        REPOSITORY: ${{ github.repository }}
+        SCAN_BRANCH: ${{ steps.scan-branch.outputs.scan_branch }}
       run: |
-        node "$ACTION_PATH/scripts/comment-pr-findings.js"
+        echo "Creating or updating security findings issue..."
+        
+        if [ "$CLAUDECODE_FINDINGS" -gt "0" ]; then
+          # Check if a security findings issue already exists
+          ISSUE_NUMBER=$(gh issue list --repo "$REPOSITORY" --label "security-findings" --state open --json number --jq '.[0].number // empty')
+          
+          ISSUE_TITLE="🛡️ Security Findings from Claude Scanner"
+          ISSUE_BODY="## Security Scan Results
+        
+        **Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        **Branch:** \`$SCAN_BRANCH\`
+        **Findings:** $CLAUDECODE_FINDINGS issues detected
+        
+        Please review the attached artifacts for detailed findings.
+        
+        ---
+        
+        This issue is automatically created/updated by the Claude Security Scanner."
+          
+          if [ -n "$ISSUE_NUMBER" ]; then
+            echo "Updating existing issue #$ISSUE_NUMBER"
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPOSITORY" --body "$ISSUE_BODY"
+          else
+            echo "Creating new security findings issue"
+            gh issue create --repo "$REPOSITORY" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" --label "security-findings"
+          fi
+        else
+          echo "No security findings to report"
+        fi
 
 branding:
   icon: 'shield'

@@ -118,6 +118,22 @@ class GitHubActionClient:
 
         return self._filter_generated_files(response.text)
 
+    def get_repo_data(self, repo_name: str) -> Dict[str, Any]:
+        """Get repository metadata from GitHub API."""
+        repo_url = f"https://api.github.com/repos/{repo_name}"
+        response = requests.get(repo_url, headers=self.headers)
+        response.raise_for_status()
+        repo_data = response.json()
+        
+        return {
+            'full_name': repo_data.get('full_name', repo_name),
+            'description': repo_data.get('description', ''),
+            'language': repo_data.get('language', 'unknown'),
+            'default_branch': repo_data.get('default_branch', 'main'),
+            'topics': repo_data.get('topics', []),
+            'size': repo_data.get('size', 0)
+        }
+
     def _is_excluded(self, filepath: str) -> bool:
         """Check if a file should be excluded based on directory patterns."""
         for excluded_dir in self.excluded_dirs:
@@ -276,6 +292,7 @@ class SimpleClaudeRunner:
             'findings': [],
             'analysis_summary': {
                 'files_reviewed': 0,
+                'critical_severity': 0,
                 'high_severity': 0,
                 'medium_severity': 0,
                 'low_severity': 0,
@@ -314,23 +331,14 @@ class SimpleClaudeRunner:
             return False, f"Failed to check Claude Code: {str(e)}"
 
 
-def get_environment_config() -> Tuple[str, int]:
+def get_environment_config() -> str:
     """Get and validate environment configuration."""
     repo_name = os.environ.get('GITHUB_REPOSITORY')
-    pr_number_str = os.environ.get('PR_NUMBER')
 
     if not repo_name:
         raise ConfigurationError('GITHUB_REPOSITORY environment variable required')
-
-    if not pr_number_str:
-        raise ConfigurationError('PR_NUMBER environment variable required')
-
-    try:
-        pr_number = int(pr_number_str)
-    except ValueError:
-        raise ConfigurationError(f'Invalid PR_NUMBER: {pr_number_str}')
         
-    return repo_name, pr_number
+    return repo_name
 
 
 def initialize_clients() -> Tuple[GitHubActionClient, SimpleClaudeRunner]:
@@ -425,7 +433,7 @@ def main():
     """Main execution function for GitHub Action."""
     try:
         try:
-            repo_name, pr_number = get_environment_config()
+            repo_name = get_environment_config()
         except ConfigurationError as e:
             print(json.dumps({'error': str(e)}))
             sys.exit(EXIT_CONFIGURATION_ERROR)
@@ -468,23 +476,21 @@ def main():
             sys.exit(EXIT_GENERAL_ERROR)
 
         try:
-            pr_data = github_client.get_pr_data(repo_name, pr_number)
-            pr_diff = github_client.get_pr_diff(repo_name, pr_number)
+            repo_data = github_client.get_repo_data(repo_name)
         except Exception as e:
-            print(json.dumps({'error': f'Failed to fetch PR data: {str(e)}'}))
+            print(json.dumps({'error': f'Failed to fetch repository data: {str(e)}'}))
             sys.exit(EXIT_GENERAL_ERROR)
 
-        prompt = get_security_audit_prompt(pr_data, pr_diff, custom_scan_instructions=custom_scan_instructions)
+        prompt = get_security_audit_prompt(repo_data, custom_scan_instructions=custom_scan_instructions)
 
         repo_path = os.environ.get('REPO_PATH')
         repo_dir = Path(repo_path) if repo_path else Path.cwd()
         success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
 
         if not success and error_msg == "PROMPT_TOO_LONG":
-            print(f"[Info] Prompt too long, retrying without diff. Original prompt length: {len(prompt)} characters", file=sys.stderr)
-            prompt_without_diff = get_security_audit_prompt(pr_data, pr_diff, include_diff=False, custom_scan_instructions=custom_scan_instructions)
-            print(f"[Info] New prompt length: {len(prompt_without_diff)} characters", file=sys.stderr)
-            success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt_without_diff)
+            print(f"[Info] Prompt too long, continuing with standard prompt. Original prompt length: {len(prompt)} characters", file=sys.stderr)
+            # For full repo scans, we don't have a shorter version, so just proceed
+            pass
 
         if not success:
             print(json.dumps({'error': f'Security audit failed: {error_msg}'}))
@@ -492,9 +498,94 @@ def main():
 
         original_findings = results.get('findings', [])
 
-        pr_context = {
-            'repo_name': repo_nombre,
-            'pr_number': pr_number,
-            'title': pr_data.get('title', ''),
-            'description': pr_data.get('body', '')
+        repo_context = {
+            'repo_name': repo_name,
+            'full_name': repo_data.get('full_name', repo_name),
+            'description': repo_data.get('description', ''),
+            'language': repo_data.get('language', 'unknown')
         }
+
+        # Apply false positive filtering
+        filtering_success, filtering_results, filter_stats = findings_filter.filter_findings(
+            original_findings, repo_context
+        )
+        
+        if filtering_success:
+            filtered_findings = filtering_results.get('filtered_findings', [])
+            excluded_findings = filtering_results.get('excluded_findings', [])
+        else:
+            # If filtering fails, keep all original findings
+            filtered_findings = original_findings
+            excluded_findings = []
+        
+        # Calculate severity counts from filtered findings
+        severity_counts = {'critical_severity': 0, 'high_severity': 0, 'medium_severity': 0, 'low_severity': 0}
+        for finding in filtered_findings:
+            severity = finding.get('severity', '').upper()
+            if severity == 'CRITICAL':
+                severity_counts['critical_severity'] += 1
+            elif severity == 'HIGH':
+                severity_counts['high_severity'] += 1
+            elif severity == 'MEDIUM':
+                severity_counts['medium_severity'] += 1
+            elif severity == 'LOW':
+                severity_counts['low_severity'] += 1
+
+        # Create final results structure
+        analysis_summary = results.get('analysis_summary', {})
+        analysis_summary.update(severity_counts)
+        analysis_summary['total_findings'] = len(filtered_findings)
+
+        final_results = {
+            'findings': filtered_findings,
+            'analysis_summary': analysis_summary,
+            'filtering_stats': {
+                'original_findings': len(original_findings),
+                'filtered_findings': len(filtered_findings),
+                'excluded_findings': len(excluded_findings)
+            }
+        }
+        
+        # Handle SARIF output if requested
+        upload_results = os.environ.get('UPLOAD_RESULTS_TO_REPO', '').lower() in ['1', 'true', 'yes']
+        if upload_results:
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            sarif_output_path = os.environ.get('SARIF_OUTPUT_PATH', 
+                f'.github/claude-security-reports/security-audit-{timestamp}-findings.sarif')
+            
+            # Create directory if it doesn't exist
+            sarif_dir = Path(sarif_output_path).parent
+            sarif_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate SARIF content
+            from claudecode.sarif_utils import findings_to_sarif_string
+            sarif_content = findings_to_sarif_string(filtered_findings)
+            
+            # Write SARIF file
+            with open(sarif_output_path, 'w', encoding='utf-8') as f:
+                f.write(sarif_content)
+            
+            logger.info(f"SARIF results written to {sarif_output_path}")
+
+        # Output results as JSON
+        output_json = json.dumps(final_results, indent=2, ensure_ascii=False)
+        print(output_json)
+        
+        # Set exit code based on findings
+        if severity_counts['critical_severity'] > 0 or severity_counts['high_severity'] > 0:
+            sys.exit(EXIT_HIGH_SEVERITY_FOUND)
+        else:
+            sys.exit(0)
+
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        sys.exit(EXIT_GENERAL_ERROR)
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        print(json.dumps({'error': f'Unexpected error: {str(e)}'}), file=sys.stderr)
+        sys.exit(EXIT_GENERAL_ERROR)
+
+
+if __name__ == '__main__':
+    main()

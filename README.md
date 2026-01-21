@@ -1,43 +1,49 @@
-# Claude Code Security Reviewer
+# Claude Code Security Scanner
 
-An AI-powered security review GitHub Action using Claude to analyze code changes for security vulnerabilities. This action provides intelligent, context-aware security analysis for pull requests using Anthropic's Claude Code tool for deep semantic security analysis. See our blog post [here](https://www.anthropic.com/news/automate-security-reviews-with-claude-code) for more details.
+An AI-powered comprehensive security scanner GitHub Action using Claude to analyze entire application codebases for security vulnerabilities. This action provides intelligent, context-aware security analysis for complete repositories using Anthropic's Claude Code tool for deep semantic security analysis.
 
 ## Features
 
 - **AI-Powered Analysis**: Uses Claude's advanced reasoning to detect security vulnerabilities with deep semantic understanding
-- **Diff-Aware Scanning**: For PRs, only analyzes changed files
-- **PR Comments**: Automatically comments on PRs with security findings
-- **Contextual Understanding**: Goes beyond pattern matching to understand code semantics
+- **Comprehensive Scanning**: Analyzes entire application codebases for complete security coverage
+- **Issue Management**: Automatically creates and updates GitHub issues with security findings
+- **Contextual Understanding**: Goes beyond pattern matching to understand code semantics  
 - **Language Agnostic**: Works with any programming language
 - **False Positive Filtering**: Advanced filtering to reduce noise and focus on real vulnerabilities
+- **GraphQL Security**: Enhanced detection of GraphQL authorization vulnerabilities
+- **Critical Severity Support**: Special handling for urgent sensitive data disclosure issues
 
 ## Quick Start
 
 Add this to your repository's `.github/workflows/security.yml`:
 
 ```yaml
-name: Security Review
+name: Weekly Security Scan
 
 permissions:
-  pull-requests: write  # Needed for leaving PR comments
+  issues: write  # Needed for creating/updating security issues
   contents: read
+  actions: read
 
 on:
-  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'  # Run every Monday at 6 AM UTC
+  workflow_dispatch:  # Allow manual triggering
 
 jobs:
-  security:
+  security-scan:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    steps:      
+      - uses: CyBirdSecurity/Claude-Security-Scanner@main
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
-      
-      - uses: anthropics/claude-code-security-review@main
-        with:
-          comment-pr: true
+          create-issue: true
           claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+
+      - name: Upload SARIF to GitHub (Code Scanning)
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: .github/claude-security-reports/pr-${{ github.event.pull_request.number }}-findings.sarif
+          category: Claude-Security-Review
 ```
 
 ## Security Considerations
@@ -51,12 +57,12 @@ This action is not hardened against prompt injection attacks and should only be 
 | Input | Description | Default | Required |
 |-------|-------------|---------|----------|
 | `claude-api-key` | Anthropic Claude API key for security analysis. <br>*Note*: This API key needs to be enabled for both the Claude API and Claude Code usage. | None | Yes |
-| `comment-pr` | Whether to comment on PRs with findings | `true` | No |
+| `create-issue` | Whether to create or update GitHub issues with findings | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
+| `branch` | Branch to scan (defaults to repository default branch) | repository default | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
 | `claude-model` | Claude [model name](https://docs.anthropic.com/en/docs/about-claude/models/overview#model-names) to use. Defaults to Opus 4.1. | `claude-opus-4-1-20250805` | No |
 | `claudecode-timeout` | Timeout for ClaudeCode analysis in minutes | `20` | No |
-| `run-every-commit` | Run ClaudeCode on every commit (skips cache check). Warning: May increase false positives on PRs with many commits. | `false` | No |
 | `false-positive-filtering-instructions` | Path to custom false positive filtering instructions text file | None | No |
 | `custom-security-scan-instructions` | Path to custom security scan instructions text file to append to audit prompt | None | No |
 
@@ -85,11 +91,11 @@ claudecode/
 
 ### Workflow
 
-1. **PR Analysis**: When a pull request is opened, Claude analyzes the diff to understand what changed
-2. **Contextual Review**: Claude examines the code changes in context, understanding the purpose and potential security implications
+1. **Repository Analysis**: On a scheduled basis, Claude performs a comprehensive scan of the entire application codebase
+2. **Deep Security Review**: Claude systematically examines all source code files for security vulnerabilities using advanced reasoning
 3. **Finding Generation**: Security issues are identified with detailed explanations, severity ratings, and remediation guidance
 4. **False Positive Filtering**: Advanced filtering removes low-impact or false positive prone findings to reduce noise
-5. **PR Comments**: Findings are posted as review comments on the specific lines of code
+5. **Issue Management**: Findings are consolidated into GitHub issues for tracking and resolution
 
 ## Security Analysis Capabilities
 

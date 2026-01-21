@@ -232,6 +232,12 @@ class FindingsFilter:
         
         if self.use_hard_exclusions:
             for i, finding in enumerate(findings):
+                # Never exclude CRITICAL severity findings
+                severity = finding.get('severity', '').upper()
+                if severity == 'CRITICAL':
+                    findings_after_hard.append((i, finding))
+                    continue
+                
                 exclusion_reason = HardExclusionRules.get_exclusion_reason(finding)
                 if exclusion_reason:
                     excluded_hard.append({
@@ -261,6 +267,18 @@ class FindingsFilter:
             logger.info(f"Processing {len(findings_after_hard)} findings individually through Claude API")
             
             for orig_idx, finding in findings_after_hard:
+                # Never exclude CRITICAL severity findings from Claude filtering
+                severity = finding.get('severity', '').upper()
+                if severity == 'CRITICAL':
+                    enriched_finding = finding.copy()
+                    enriched_finding['_filter_metadata'] = {
+                        'confidence_score': 10.0,  # Always highest confidence for critical
+                        'justification': 'CRITICAL severity - never filtered',
+                    }
+                    findings_after_claude.append(enriched_finding)
+                    stats.kept_findings += 1
+                    continue
+                
                 # Call Claude API for single finding
                 success, analysis_result, error_msg = self.claude_client.analyze_single_finding(
                     finding, pr_context, self.custom_filtering_instructions

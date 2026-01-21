@@ -229,6 +229,7 @@ class TestSimpleClaudeRunner:
                 "findings": [{"file": "test.py", "line": 1, "severity": "LOW", "description": "Issue"}],
                 "analysis_summary": {
                     "files_reviewed": 1,
+                    "critical_severity": 0,
                     "high_severity": 0,
                     "medium_severity": 0,
                     "low_severity": 1,
@@ -316,7 +317,8 @@ class TestSimpleClaudeRunner:
             ],
             "analysis_summary": {
                 "files_reviewed": 3,
-                "high_severity": 0,
+                "critical_severity": 0,
+                    "high_severity": 0,
                 "medium_severity": 1,
                 "low_severity": 0
             }

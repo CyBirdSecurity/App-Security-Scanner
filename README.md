@@ -130,6 +130,51 @@ The false positive filtering can also be tuned as needed for a given project's s
 
 Follow the Quick Start guide above. The action handles all dependencies automatically.
 
+### New: Write SARIF and upload via github/codeql-action/upload-sarif@v2
+
+This action can optionally write SARIF results to a file inside the repository workspace; a separate workflow step can then upload the SARIF to GitHub via github/codeql-action/upload-sarif@v2.
+
+Configuration:
+- `UPLOAD_RESULTS_TO_REPO` (env): boolean (`1|true|yes`) — when true, the action writes a SARIF file to disk. Default: `false`.
+- `SARIF_OUTPUT_PATH` (env): optional path to write the SARIF file (default: `.github/claude-security-reports/pr-<pr-number>-findings.sarif`).
+
+Example workflow:
+
+```yaml
+permissions:
+  pull-requests: write
+  security-events: write  # required for uploading SARIF using the CodeQL upload action
+
+on:
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+
+      - name: Run Claude Code Security Review
+        uses: CyBirdSecurity/Claude-Security-Scanner@feature/upload-sarif-codescanning
+        env:
+          UPLOAD_RESULTS_TO_REPO: true
+          SARIF_OUTPUT_PATH: .github/claude-security-reports/pr-${{ github.event.pull_request.number }}-findings.sarif
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+
+      - name: Upload SARIF to GitHub (Code Scanning)
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: .github/claude-security-reports/pr-${{ github.event.pull_request.number }}-findings.sarif
+```
+
+Notes:
+- The `security-events: write` permission is required for the upload action to succeed.
+- Writing the SARIF file does not commit it to the repository; it creates the file in the workflow's workspace so the upload action can read it.
+```
+
 ### Local Development
 
 To run the security scanner locally against a specific PR, see the [evaluation framework documentation](claudecode/evals/README.md).

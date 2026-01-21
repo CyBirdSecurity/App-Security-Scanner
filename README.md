@@ -6,7 +6,7 @@ An AI-powered comprehensive security scanner GitHub Action using Claude to analy
 
 - **AI-Powered Analysis**: Uses Claude's advanced reasoning to detect security vulnerabilities with deep semantic understanding
 - **Comprehensive Scanning**: Analyzes entire application codebases for complete security coverage
-- **Issue Management**: Automatically creates and updates GitHub issues with security findings
+- **GitHub Code Scanning Integration**: Automatically uploads findings to GitHub's Security tab as Code Scanning alerts
 - **Contextual Understanding**: Goes beyond pattern matching to understand code semantics  
 - **Language Agnostic**: Works with any programming language
 - **False Positive Filtering**: Advanced filtering to reduce noise and focus on real vulnerabilities
@@ -21,7 +21,7 @@ Add this to your repository's `.github/workflows/security.yml`:
 name: Weekly Security Scan
 
 permissions:
-  issues: write  # Needed for creating/updating security issues
+  security-events: write  # Needed for uploading SARIF to Code Scanning
   contents: read
   actions: read
 
@@ -36,19 +36,13 @@ jobs:
     steps:      
       - uses: CyBirdSecurity/Claude-Security-Scanner@main
         with:
-          create-issue: true
+          upload-sarif: true
           claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
-
-      - name: Upload SARIF to GitHub (Code Scanning)
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: .github/claude-security-reports/pr-${{ github.event.pull_request.number }}-findings.sarif
-          category: Claude-Security-Review
 ```
 
 ## Security Considerations
 
-This action is not hardened against prompt injection attacks and should only be used to review trusted PRs. We recommend [configuring your repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#controlling-changes-from-forks-to-workflows-in-public-repositories) to use the "Require approval for all external contributors" option to ensure workflows only run after a maintainer has reviewed the PR.
+This action scans your entire codebase and should only be used in trusted repositories. The scanner requires read access to your repository contents and write access to security events for SARIF upload. Ensure your `CLAUDE_API_KEY` is stored securely in GitHub Secrets.
 
 ## Configuration Options
 
@@ -57,7 +51,7 @@ This action is not hardened against prompt injection attacks and should only be 
 | Input | Description | Default | Required |
 |-------|-------------|---------|----------|
 | `claude-api-key` | Anthropic Claude API key for security analysis. <br>*Note*: This API key needs to be enabled for both the Claude API and Claude Code usage. | None | Yes |
-| `create-issue` | Whether to create or update GitHub issues with findings | `true` | No |
+| `upload-sarif` | Whether to upload SARIF results to GitHub Code Scanning | `true` | No |
 | `upload-results` | Whether to upload results as artifacts | `true` | No |
 | `branch` | Branch to scan (defaults to repository default branch) | repository default | No |
 | `exclude-directories` | Comma-separated list of directories to exclude from scanning | None | No |
@@ -95,7 +89,7 @@ claudecode/
 2. **Deep Security Review**: Claude systematically examines all source code files for security vulnerabilities using advanced reasoning
 3. **Finding Generation**: Security issues are identified with detailed explanations, severity ratings, and remediation guidance
 4. **False Positive Filtering**: Advanced filtering removes low-impact or false positive prone findings to reduce noise
-5. **Issue Management**: Findings are consolidated into GitHub issues for tracking and resolution
+5. **Code Scanning Integration**: Findings are uploaded as SARIF to GitHub's Security tab for centralized vulnerability management
 
 ## Security Analysis Capabilities
 
@@ -136,51 +130,24 @@ The false positive filtering can also be tuned as needed for a given project's s
 
 Follow the Quick Start guide above. The action handles all dependencies automatically.
 
-### New: Write SARIF and upload via github/codeql-action/upload-sarif@v2
+### GitHub Code Scanning Integration
 
-This action can optionally write SARIF results to a file inside the repository workspace; a separate workflow step can then upload the SARIF to GitHub via github/codeql-action/upload-sarif@v2.
+The scanner automatically integrates with GitHub's Code Scanning feature by generating and uploading SARIF (Static Analysis Results Interchange Format) files. When `upload-sarif` is enabled (default), security findings will appear in your repository's **Security** tab under **Code scanning alerts**.
 
-Configuration:
-- `UPLOAD_RESULTS_TO_REPO` (env): boolean (`1|true|yes`) — when true, the action writes a SARIF file to disk. Default: `false`.
-- `SARIF_OUTPUT_PATH` (env): optional path to write the SARIF file (default: `.github/claude-security-reports/pr-<pr-number>-findings.sarif`).
+**Benefits of Code Scanning Integration:**
+- **Centralized Security Dashboard**: All security findings appear in GitHub's Security tab
+- **Alert Management**: Mark findings as resolved, dismissed, or create issues directly from alerts
+- **Pull Request Integration**: Code scanning alerts automatically appear on pull requests affecting the flagged code
+- **Historical Tracking**: Track security improvements over time with trend analysis
+- **Severity Filtering**: Filter alerts by Critical, High, Medium, and Low severity levels
 
-Example workflow:
+**Accessing Your Security Alerts:**
+1. Navigate to your repository on GitHub
+2. Click the **Security** tab
+3. Select **Code scanning alerts** to view all findings
+4. Click on individual alerts for detailed remediation guidance
 
-```yaml
-permissions:
-  pull-requests: write
-  security-events: write  # required for uploading SARIF using the CodeQL upload action
-
-on:
-  pull_request:
-
-jobs:
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 2
-
-      - name: Run Claude Code Security Review
-        uses: CyBirdSecurity/Claude-Security-Scanner@feature/upload-sarif-codescanning
-        env:
-          UPLOAD_RESULTS_TO_REPO: true
-          SARIF_OUTPUT_PATH: .github/claude-security-reports/pr-${{ github.event.pull_request.number }}-findings.sarif
-          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-
-      - name: Upload SARIF to GitHub (Code Scanning)
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: .github/claude-security-reports/pr-${{ github.event.pull_request.number }}-findings.sarif
-          category: Claude-Security-Review
-```
-
-Notes:
-- The `security-events: write` permission is required for the upload action to succeed.
-- Writing the SARIF file does not commit it to the repository; it creates the file in the workflow's workspace so the upload action can read it.
-```
+The scanner uses the "Claude-Security-Scanner" category in Code Scanning to distinguish its findings from other security tools.
 
 ### Local Development
 

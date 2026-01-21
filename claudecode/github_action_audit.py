@@ -546,27 +546,23 @@ def main():
             }
         }
         
-        # Handle SARIF output if requested
+        # Generate SARIF output for Code Scanning
         upload_results = os.environ.get('UPLOAD_RESULTS_TO_REPO', '').lower() in ['1', 'true', 'yes']
         if upload_results:
-            from datetime import datetime
-            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            sarif_output_path = os.environ.get('SARIF_OUTPUT_PATH', 
-                f'.github/claude-security-reports/security-audit-{timestamp}-findings.sarif')
+            sarif_output_path = os.environ.get('SARIF_OUTPUT_PATH', 'claude-security-findings.sarif')
             
-            # Create directory if it doesn't exist
-            sarif_dir = Path(sarif_output_path).parent
-            sarif_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Generate SARIF content
+            # Generate SARIF content with proper tool information
             from claudecode.sarif_utils import findings_to_sarif_string
-            sarif_content = findings_to_sarif_string(filtered_findings)
+            sarif_content = findings_to_sarif_string(
+                filtered_findings, 
+                tool_name="Claude Security Scanner"
+            )
             
-            # Write SARIF file
+            # Write SARIF file to workspace root for Code Scanning pickup
             with open(sarif_output_path, 'w', encoding='utf-8') as f:
                 f.write(sarif_content)
             
-            logger.info(f"SARIF results written to {sarif_output_path}")
+            logger.info(f"SARIF results written to {sarif_output_path} for GitHub Code Scanning")
 
         # Output results as JSON
         output_json = json.dumps(final_results, indent=2, ensure_ascii=False)

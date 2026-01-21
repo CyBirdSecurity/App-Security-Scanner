@@ -78,7 +78,9 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
                     "driver": {
                         "name": tool_name,
                         "fullName": tool_full_name,
-                        "informationUri": "https://github.com/anthropics/claude-code-security-review",
+                        "version": "1.0.0",
+                        "semanticVersion": "1.0.0",
+                        "informationUri": "https://github.com/CyBirdSecurity/Claude-Security-Scanner",
                         "rules": list(rules_map.values())
                     }
                 },

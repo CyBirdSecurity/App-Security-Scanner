@@ -3,8 +3,8 @@ description: 'AI-powered comprehensive security scanner using Claude to analyze 
 author: 'Anthropic'
 
 inputs:
-  create-issue:
-    description: 'Whether to create or update GitHub issues with findings'
+  upload-sarif:
+    description: 'Whether to upload SARIF results to GitHub Code Scanning'
     required: false
     default: 'true'
   
@@ -125,6 +125,8 @@ runs:
         CLAUDECODE_TIMEOUT: ${{ inputs.claudecode-timeout }}
         ACTION_PATH: ${{ github.action_path }}
         SCAN_BRANCH: ${{ steps.scan-branch.outputs.scan_branch }}
+        UPLOAD_RESULTS_TO_REPO: ${{ inputs.upload-sarif }}
+        SARIF_OUTPUT_PATH: claude-security-findings.sarif
       run: |
         echo "Running Claude AI comprehensive security analysis..."
         echo "Repository: $GITHUB_REPOSITORY"
@@ -249,44 +251,13 @@ runs:
         retention-days: 7
         if-no-files-found: ignore
     
-    - name: Create or update security issue
-      if: inputs.create-issue == 'true'
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-        CLAUDECODE_FINDINGS: ${{ steps.claudecode-scan.outputs.findings_count }}
-        REPOSITORY: ${{ github.repository }}
-        SCAN_BRANCH: ${{ steps.scan-branch.outputs.scan_branch }}
-      run: |
-        echo "Creating or updating security findings issue..."
-        
-        if [ "$CLAUDECODE_FINDINGS" -gt "0" ]; then
-          # Check if a security findings issue already exists
-          ISSUE_NUMBER=$(gh issue list --repo "$REPOSITORY" --label "security-findings" --state open --json number --jq '.[0].number // empty')
-          
-          ISSUE_TITLE="🛡️ Security Findings from Claude Scanner"
-          ISSUE_BODY="## Security Scan Results
-        
-        **Scan Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-        **Branch:** \`$SCAN_BRANCH\`
-        **Findings:** $CLAUDECODE_FINDINGS issues detected
-        
-        Please review the attached artifacts for detailed findings.
-        
-        ---
-        
-        This issue is automatically created/updated by the Claude Security Scanner."
-          
-          if [ -n "$ISSUE_NUMBER" ]; then
-            echo "Updating existing issue #$ISSUE_NUMBER"
-            gh issue edit "$ISSUE_NUMBER" --repo "$REPOSITORY" --body "$ISSUE_BODY"
-          else
-            echo "Creating new security findings issue"
-            gh issue create --repo "$REPOSITORY" --title "$ISSUE_TITLE" --body "$ISSUE_BODY" --label "security-findings"
-          fi
-        else
-          echo "No security findings to report"
-        fi
+    - name: Upload SARIF to GitHub Code Scanning
+      if: inputs.upload-sarif == 'true' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: claude-security-findings.sarif
+        category: Claude-Security-Scanner
+        wait-for-processing: false
 
 branding:
   icon: 'shield'

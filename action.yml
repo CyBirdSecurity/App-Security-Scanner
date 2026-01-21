@@ -29,9 +29,9 @@ inputs:
     default: ''
 
   claude-model:
-    description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-20250514)'
+    description: 'Claude model to use for security analysis (e.g., claude-sonnet-4-5-20250929)'
     required: false
-    default: ''
+    default: 'claude-sonnet-4-5'
 
   branch:
     description: 'Branch to scan (defaults to repository default branch)'

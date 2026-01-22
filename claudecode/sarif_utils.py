@@ -3,6 +3,7 @@
 from typing import List, Dict, Any, Optional
 import json
 import datetime
+import hashlib
 
 def _severity_to_level(severity: str) -> str:
     if not severity:
@@ -28,12 +29,18 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
     for f in findings:
         rule_id = f.get("category", "unknown")
         if rule_id not in rules_map:
+            description = f.get("description", "") or f"Security issue: {rule_id}"
+            recommendation = f.get("recommendation", "")
+            help_text = description
+            if recommendation:
+                help_text += f"\n\n**Recommendation:** {recommendation}"
+            
             rules_map[rule_id] = {
                 "id": str(rule_id),
-                "name": str(rule_id),
-                "shortDescription": {"text": rule_id},
-                "fullDescription": {"text": f.get("description", "") or ""},
-                "help": {"text": f.get("description", "") or ""}
+                "name": str(rule_id).replace("_", " ").title(),
+                "shortDescription": {"text": description},
+                "fullDescription": {"text": help_text},
+                "help": {"text": help_text}
             }
 
     results: List[Dict[str, Any]] = []
@@ -45,20 +52,35 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
         if confidence is not None:
             message_text = f"{message_text} (confidence: {confidence})"
 
+        # Use relative path from repository root
+        file_path = f.get("file", "<unknown>")
+        if file_path.startswith("./"):
+            file_path = file_path[2:]  # Remove leading ./
+        
         location = {
             "physicalLocation": {
-                "artifactLocation": {"uri": f.get("file", "<unknown>")},
-                "region": {}
+                "artifactLocation": {"uri": file_path}
             }
         }
-        if isinstance(f.get("line"), int):
-            location["physicalLocation"]["region"]["startLine"] = f["line"]
+        
+        # Add region information if line number is available
+        if isinstance(f.get("line"), int) and f["line"] > 0:
+            location["physicalLocation"]["region"] = {
+                "startLine": f["line"]
+            }
 
+        # Generate partial fingerprint for result tracking
+        fingerprint_data = f"{file_path}:{f.get('line', 0)}:{rule_id}:{message_text}"
+        partial_fingerprint = hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
+        
         result = {
             "ruleId": str(rule_id),
             "level": level,
             "message": {"text": message_text},
             "locations": [location],
+            "partialFingerprints": {
+                "primaryLocationLineHash": partial_fingerprint
+            }
         }
         extras = {}
         for key in ("severity", "category", "confidence", "description", "extra"):
@@ -71,7 +93,7 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
 
     sarif = {
         "version": "2.1.0",
-        "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0.json",
+        "$schema": "https://www.schemastore.org/schemas/json/sarif-2.1.0.json",
         "runs": [
             {
                 "tool": {
@@ -87,7 +109,6 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
                 "invocations": [
                     {
                         "executionSuccessful": True,
-                        "executionSuccessfulKind": "completed",
                         "startTimeUtc": timestamp
                     }
                 ],

@@ -186,6 +186,6 @@ Begin your analysis now. Do this in 3 steps:
 
 1. Use a sub-task to identify vulnerabilities. Use the repository exploration tools to understand the codebase context, then analyze the PR changes for security implications. In the prompt for this sub-task, include all of the above.
 2. Then for each vulnerability identified by the above sub-task, create a new sub-task to filter out false-positives. Launch these sub-tasks as parallel sub-tasks. In the prompt for these sub-tasks, include everything in the "FALSE POSITIVE FILTERING" instructions.
-3. Filter out any vulnerabilities where the sub-task reported a confidence less than 8.
+3. Filter out any vulnerabilities where the sub-task reported a confidence less than 7.
 
 Your final reply must contain the markdown report and nothing else.

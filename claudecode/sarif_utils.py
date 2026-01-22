@@ -88,30 +88,14 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
                 "startLine": f["line"]
             }
 
-        # Generate stable partial fingerprint for result tracking
-        # Use only stable elements: file path, line number, rule category, and core description
-        core_description = f.get("description", "").split("(confidence:")[0].strip()  # Remove dynamic confidence info
-        # Normalize description: remove extra whitespace and convert to lowercase for consistency
-        normalized_description = " ".join(core_description.lower().split())
-        fingerprint_data = f"{file_path}:{f.get('line', 0)}:{rule_id}:{normalized_description}"
-        partial_fingerprint = hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
-        
-        # Create multiple fingerprints for better stability
-        line_based_fingerprint = partial_fingerprint
-        
-        # Content-based fingerprint (without line number for cases where lines shift)
-        content_fingerprint_data = f"{file_path}:{rule_id}:{normalized_description}"
-        content_fingerprint = hashlib.sha256(content_fingerprint_data.encode()).hexdigest()[:16]
+        # Let GitHub calculate its own fingerprints - remove manual fingerprint calculation
+        # to avoid conflicts with existing fingerprints in GitHub Code Scanning
         
         result = {
             "ruleId": str(rule_id),
             "level": level,
             "message": {"text": message_text},
-            "locations": [location],
-            "partialFingerprints": {
-                "primaryLocationLineHash": line_based_fingerprint,
-                "primaryLocationContentHash": content_fingerprint
-            }
+            "locations": [location]
         }
         
         # Add security severity for vulnerability findings

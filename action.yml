@@ -182,7 +182,11 @@ runs:
         python -u claudecode/github_action_audit.py > claudecode/claudecode-results.json 2>claudecode/claudecode-error.log || CLAUDECODE_EXIT_CODE=$?
         
         if [ -n "$CLAUDECODE_EXIT_CODE" ]; then
-          echo "::warning::ClaudeCode exited with code $CLAUDECODE_EXIT_CODE"
+          if [ "$CLAUDECODE_EXIT_CODE" = "3" ]; then
+            echo "ClaudeCode scan completed successfully with high/critical severity findings (exit code 3)"
+          else
+            echo "::warning::ClaudeCode exited with code $CLAUDECODE_EXIT_CODE"
+          fi
         else
           echo "ClaudeCode scan completed successfully"
         fi

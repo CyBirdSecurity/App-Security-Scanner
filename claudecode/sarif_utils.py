@@ -6,18 +6,29 @@ import datetime
 import hashlib
 
 def _severity_to_level(severity: str) -> str:
+    # For security vulnerabilities, use 'warning' level with security severity
     if not severity:
         return "note"
     s = severity.strip().upper()
-    if s == "CRITICAL":
-        return "error"
-    if s == "HIGH":
-        return "error"
-    if s == "MEDIUM":
+    if s in ["CRITICAL", "HIGH", "MEDIUM"]:
         return "warning"
     if s == "LOW":
         return "note"
     return "note"
+
+def _get_security_severity(severity: str) -> str:
+    if not severity:
+        return "low"
+    s = severity.strip().lower()
+    if s == "critical":
+        return "critical"
+    if s == "high":
+        return "high"
+    if s == "medium":
+        return "medium"
+    if s == "low":
+        return "low"
+    return "low"
 
 def findings_to_sarif(findings: List[Dict[str, Any]],
                       tool_name: str = "Claude Code Security Reviewer",
@@ -35,13 +46,21 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
             if recommendation:
                 help_text += f"\n\n**Recommendation:** {recommendation}"
             
-            rules_map[rule_id] = {
+            rule = {
                 "id": str(rule_id),
                 "name": str(rule_id).replace("_", " ").title(),
                 "shortDescription": {"text": description},
                 "fullDescription": {"text": help_text},
                 "help": {"text": help_text}
             }
+            
+            # Add default security severity for the rule if this is a security finding
+            severity = f.get("severity", "")
+            if severity:
+                security_severity = _get_security_severity(severity)
+                rule["properties"] = {"security-severity": security_severity}
+            
+            rules_map[rule_id] = rule
 
     results: List[Dict[str, Any]] = []
     for f in findings:
@@ -94,6 +113,13 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
                 "primaryLocationContentHash": content_fingerprint
             }
         }
+        
+        # Add security severity for vulnerability findings
+        severity = f.get("severity", "")
+        if severity:
+            security_severity = _get_security_severity(severity)
+            result["properties"] = result.get("properties", {})
+            result["properties"]["security-severity"] = security_severity
         extras = {}
         for key in ("severity", "category", "confidence", "description", "extra"):
             if key in f:

@@ -232,9 +232,18 @@ class FindingsFilter:
         
         if self.use_hard_exclusions:
             for i, finding in enumerate(findings):
-                # Never exclude CRITICAL severity findings
+                # Never exclude CRITICAL severity findings or HIGH severity auth/authz findings
                 severity = finding.get('severity', '').upper()
-                if severity == 'CRITICAL':
+                category = finding.get('category', '').lower()
+                
+                # Critical finding categories that should never be filtered
+                critical_categories = {
+                    'authentication_bypass', 'authorization_bypass', 'auth_bypass', 
+                    'privilege_escalation', 'idor', 'access_control_bypass'
+                }
+                
+                if (severity == 'CRITICAL' or 
+                    (severity == 'HIGH' and category in critical_categories)):
                     findings_after_hard.append((i, finding))
                     continue
                 
@@ -267,13 +276,22 @@ class FindingsFilter:
             logger.info(f"Processing {len(findings_after_hard)} findings individually through Claude API")
             
             for orig_idx, finding in findings_after_hard:
-                # Never exclude CRITICAL severity findings from Claude filtering
+                # Never exclude CRITICAL or HIGH severity authentication/authorization findings from Claude filtering
                 severity = finding.get('severity', '').upper()
-                if severity == 'CRITICAL':
+                category = finding.get('category', '').lower()
+                
+                # Critical finding categories that should never be filtered
+                critical_categories = {
+                    'authentication_bypass', 'authorization_bypass', 'auth_bypass', 
+                    'privilege_escalation', 'idor', 'access_control_bypass'
+                }
+                
+                if (severity == 'CRITICAL' or 
+                    (severity == 'HIGH' and category in critical_categories)):
                     enriched_finding = finding.copy()
                     enriched_finding['_filter_metadata'] = {
-                        'confidence_score': 10.0,  # Always highest confidence for critical
-                        'justification': 'CRITICAL severity - never filtered',
+                        'confidence_score': 10.0,  # Always highest confidence 
+                        'justification': f'{severity} severity {category} - never filtered',
                     }
                     findings_after_claude.append(enriched_finding)
                     stats.kept_findings += 1

@@ -9,10 +9,10 @@ import sys
 import json
 import subprocess
 import requests
+import time
 from typing import Dict, Any, List, Tuple, Optional
 from pathlib import Path
 import re
-import time
 
 # Import existing components we can reuse
 from claudecode.prompts import get_security_audit_prompt
@@ -28,6 +28,7 @@ from claudecode.constants import (
 )
 from claudecode.logger import get_logger
 from claudecode.sarif_utils import findings_to_sarif_string
+from claudecode.baseline_validator import BaselineValidator
 
 logger = get_logger(__name__)
 
@@ -494,18 +495,117 @@ def main():
         
         repo_path = os.environ.get('REPO_PATH')
         repo_dir = Path(repo_path) if repo_path else Path.cwd()
-        success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
+        
+        # Retry logic for incomplete analyses
+        MAX_ANALYSIS_ATTEMPTS = 2
+        for attempt in range(MAX_ANALYSIS_ATTEMPTS):
+            success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
 
-        if not success and error_msg == "PROMPT_TOO_LONG":
-            print(f"[Info] Prompt too long, continuing with standard prompt. Original prompt length: {len(prompt)} characters", file=sys.stderr)
-            # For full repo scans, we don't have a shorter version, so just proceed
-            pass
+            if not success and error_msg == "PROMPT_TOO_LONG":
+                print(f"[Info] Prompt too long, continuing with standard prompt. Original prompt length: {len(prompt)} characters", file=sys.stderr)
+                # For full repo scans, we don't have a shorter version, so just proceed
+                pass
 
-        if not success:
-            print(json.dumps({'error': f'Security audit failed: {error_msg}'}))
-            sys.exit(EXIT_GENERAL_ERROR)
+            if not success:
+                if attempt < MAX_ANALYSIS_ATTEMPTS - 1:
+                    print(f"[Warning] Analysis attempt {attempt + 1} failed: {error_msg}. Retrying...", file=sys.stderr)
+                    time.sleep(10)  # Brief delay before retry
+                    continue
+                else:
+                    print(json.dumps({'error': f'Security audit failed after {MAX_ANALYSIS_ATTEMPTS} attempts: {error_msg}'}))
+                    sys.exit(EXIT_GENERAL_ERROR)
+            
+            # Check if analysis appears complete based on percentage coverage
+            analysis_summary = results.get('analysis_summary', {})
+            files_reviewed = analysis_summary.get('files_reviewed', 0)
+            
+            # Calculate expected file count for retry logic
+            retry_needed = False
+            if (attempt < MAX_ANALYSIS_ATTEMPTS - 1 and 
+                repo_data.get('language', '').lower() == 'ruby'):
+                try:
+                    # Quick estimate of total application files for retry decision
+                    controller_count = subprocess.run(
+                        ['find', repo_dir, '-path', '*/app/controllers/*.rb', '-type', 'f'], 
+                        capture_output=True, text=True
+                    ).stdout.count('\n')
+                    model_count = subprocess.run(
+                        ['find', repo_dir, '-path', '*/app/models/*.rb', '-type', 'f'], 
+                        capture_output=True, text=True
+                    ).stdout.count('\n')
+                    
+                    # Minimum expectation: at least 50% of critical files (controllers + models)
+                    min_critical_files = max(5, (controller_count + model_count) // 2)
+                    
+                    if files_reviewed < min_critical_files:
+                        retry_needed = True
+                        coverage_pct = (files_reviewed / (controller_count + model_count) * 100) if (controller_count + model_count) > 0 else 0
+                        print(f"[Warning] Analysis attempt {attempt + 1} appears incomplete: {files_reviewed} files reviewed ({coverage_pct:.1f}% of critical files). Retrying...", file=sys.stderr)
+                        
+                except Exception as e:
+                    # Fallback to simple file count check
+                    if files_reviewed < 20:  # Very conservative fallback
+                        retry_needed = True
+                        print(f"[Warning] Analysis attempt {attempt + 1} appears incomplete (only {files_reviewed} files reviewed). Retrying...", file=sys.stderr)
+            
+            if retry_needed:
+                time.sleep(15)  # Longer delay for incomplete analysis retry
+                continue
+            
+            # Analysis succeeded and appears reasonably complete
+            break
 
         original_findings = results.get('findings', [])
+        
+        # Validate analysis completeness 
+        analysis_summary = results.get('analysis_summary', {})
+        files_reviewed = analysis_summary.get('files_reviewed', 0)
+        claude_reported_coverage = analysis_summary.get('coverage_percentage', 0)
+        
+        # Perform percentage-based completeness check for Ruby/Rails apps
+        if repo_data.get('language', '').lower() == 'ruby':
+            try:
+                # Count actual Ruby files in key directories
+                controller_count = subprocess.run(
+                    ['find', repo_dir, '-path', '*/app/controllers/*.rb', '-type', 'f'], 
+                    capture_output=True, text=True
+                ).stdout.count('\n')
+                model_count = subprocess.run(
+                    ['find', repo_dir, '-path', '*/app/models/*.rb', '-type', 'f'], 
+                    capture_output=True, text=True
+                ).stdout.count('\n')
+                config_count = subprocess.run(
+                    ['find', repo_dir, '-path', '*/config/*.rb', '-type', 'f'], 
+                    capture_output=True, text=True
+                ).stdout.count('\n')
+                lib_count = subprocess.run(
+                    ['find', repo_dir, '-path', '*/lib/*.rb', '-path', '*/app/services/*.rb', '-o', '-path', '*/app/lib/*.rb', '-type', 'f'], 
+                    capture_output=True, text=True
+                ).stdout.count('\n')
+                
+                # Calculate total security-critical files
+                critical_files = controller_count + model_count + config_count
+                total_app_files = critical_files + lib_count
+                
+                # Expected coverage: 75% of total application files, 100% of critical files
+                expected_min_files = int(total_app_files * 0.75)
+                critical_coverage_required = critical_files  # 100% of critical files
+                
+                coverage_percentage = (files_reviewed / total_app_files * 100) if total_app_files > 0 else 0
+                
+                if files_reviewed < expected_min_files:
+                    print(f"[Warning] Incomplete analysis: reviewed {files_reviewed} files ({coverage_percentage:.1f}% coverage)", file=sys.stderr)
+                    print(f"[Info] Expected minimum 75% coverage: {expected_min_files} files", file=sys.stderr)
+                    print(f"[Info] Critical files - Controllers: {controller_count}, Models: {model_count}, Config: {config_count}", file=sys.stderr)
+                    if claude_reported_coverage > 0:
+                        print(f"[Info] Claude reported coverage: {claude_reported_coverage:.1f}%", file=sys.stderr)
+                else:
+                    print(f"[Info] Analysis coverage: {coverage_percentage:.1f}% ({files_reviewed}/{total_app_files} files)", file=sys.stderr)
+                    if claude_reported_coverage > 0:
+                        print(f"[Info] Claude reported coverage: {claude_reported_coverage:.1f}%", file=sys.stderr)
+                
+            except Exception as e:
+                logger.warning(f"Failed to validate analysis completeness: {e}")
 
         repo_context = {
             'repo_name': repo_name,
@@ -526,6 +626,16 @@ def main():
             # If filtering fails, keep all original findings
             filtered_findings = original_findings
             excluded_findings = []
+        
+        # Apply baseline validation to ensure critical findings persist
+        try:
+            workspace_path = os.environ.get('GITHUB_WORKSPACE')
+            baseline_validator = BaselineValidator(workspace_path)
+            filtered_findings = baseline_validator.validate_findings(filtered_findings)
+            logger.info("Baseline validation completed successfully")
+        except Exception as e:
+            logger.warning(f"Baseline validation failed: {e}")
+            # Continue with original findings if baseline validation fails
         
         # Calculate severity counts from filtered findings
         severity_counts = {'critical_severity': 0, 'high_severity': 0, 'medium_severity': 0, 'low_severity': 0}

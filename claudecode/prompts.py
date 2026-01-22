@@ -176,7 +176,12 @@ You MUST output your findings as structured JSON with this exact schema:
     }}
   ],
   "analysis_summary": {{
-    "files_reviewed": 8,
+    "files_reviewed": 89,
+    "total_ruby_files_found": 118,
+    "coverage_percentage": 75.4,
+    "controllers_analyzed": ["app/controllers/teams_controller.rb", "app/controllers/application_controller.rb", "app/controllers/recommended_actions_controller.rb"],
+    "models_analyzed": ["app/models/user.rb", "app/models/team.rb", "app/models/service.rb"], 
+    "config_files_analyzed": ["config/routes.rb", "config/application.rb", "config/initializers/active_admin.rb"],
     "critical_severity": 1,
     "high_severity": 0,
     "medium_severity": 0,
@@ -213,14 +218,49 @@ IMPORTANT EXCLUSIONS - DO NOT REPORT:
 - Memory consumption or CPU exhaustion issues.
 - Lack of input validation on non-security-critical fields. If there isn't a proven problem from a lack of input validation, don't report it.
 
-ANALYSIS EXECUTION INSTRUCTIONS:
-1. Start by exploring the repository structure using file listing tools
-2. Follow the systematic methodology above in the exact order specified
-3. Apply the consistency checklist to every relevant file
-4. Maintain focus on CRITICAL and HIGH severity issues only
-5. Use identical analysis patterns to ensure reproducible results
+CRITICAL: SYSTEMATIC FILE ANALYSIS REQUIRED
+You MUST follow this exact process to ensure consistent, comprehensive analysis:
 
-Begin your comprehensive security analysis now. Use the repository exploration tools to systematically examine the entire codebase for security vulnerabilities following the deterministic methodology above.
+STEP 1: COMPLETE FILE INVENTORY
+First, create a comprehensive inventory of ALL files to understand the application scope:
+- Use `find . -name "*.rb" -type f | wc -l` to count total Ruby files 
+- Use `ls -la app/controllers/` to list ALL controllers (must analyze 100%)
+- Use `ls -la app/models/` to list ALL models (must analyze 100%)
+- Use `ls -la config/` and `ls -la config/initializers/` to list configuration files
+- Use `find . -path "./app/services/*.rb" -o -path "./lib/*.rb" | head -20` for supporting files
+
+TARGET: Analyze at least 75% of the application's security-relevant files
+
+STEP 2: MANDATORY CONTROLLER ANALYSIS
+You MUST analyze EVERY controller file individually:
+- Read each .rb file in app/controllers/ 
+- Look for missing before_action filters
+- Check for direct params usage without validation
+- Identify authorization bypass patterns
+
+STEP 3: MANDATORY MODEL ANALYSIS  
+You MUST analyze EVERY model file:
+- Read each .rb file in app/models/
+- Look for unsafe SQL queries
+- Check for mass assignment vulnerabilities
+
+STEP 4: CONFIGURATION REVIEW
+You MUST check these configuration files:
+- config/routes.rb (routing vulnerabilities)
+- config/application.rb (security settings)
+- All files in config/initializers/ (security misconfigurations)
+
+COMPLETENESS REQUIREMENTS:
+- You MUST analyze AT LEAST 75% of the application's security-critical files
+- You MUST analyze 100% of controllers (app/controllers/*.rb files)
+- You MUST analyze 100% of models (app/models/*.rb files)  
+- You MUST analyze key configuration files (config/routes.rb, config/application.rb, config/initializers/)
+- You MUST list all controllers, models, and config files you analyzed in the analysis_summary
+
+FAILURE TO MEET THESE REQUIREMENTS WILL RESULT IN ANALYSIS REJECTION.
+You must report your progress after each step (e.g., "Analyzed 15 controller files, found 3 issues").
+
+Begin your systematic analysis now. DO NOT use random file exploration - follow the exact steps above and meet the completeness requirements.
 
 IMPORTANT: Your final reply must contain ONLY the JSON output and nothing else. You should not reply again after outputting the JSON.
 """

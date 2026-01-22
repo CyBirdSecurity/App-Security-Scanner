@@ -226,8 +226,7 @@ class SimpleClaudeRunner:
                 'claude',
                 '--output-format', 'json',
                 '--model', claude_model,
-                '--disallowed-tools', 'Bash(ps:*)',
-                '--temperature', '0.1'  # Low temperature for deterministic results
+                '--disallowed-tools', 'Bash(ps:*)'
             ]
 
             # For consistency, only retry on clear failures, not parsing issues

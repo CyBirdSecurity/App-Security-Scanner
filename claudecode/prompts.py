@@ -33,10 +33,11 @@ OBJECTIVE:
 Perform a thorough security analysis to identify HIGH-CONFIDENCE security vulnerabilities across the entire codebase that could have real exploitation potential. This is a comprehensive security audit - examine all code for potential security issues including both new and existing vulnerabilities.
 
 CRITICAL INSTRUCTIONS:
-1. MINIMIZE FALSE POSITIVES: Only flag issues where you're >80% confident of actual exploitability
+1. MINIMIZE FALSE POSITIVES: Only flag issues where you're >85% confident of actual exploitability
 2. AVOID NOISE: Skip theoretical issues, style concerns, or low-impact findings
-3. FOCUS ON IMPACT: Prioritize vulnerabilities that could lead to unauthorized access, data breaches, or system compromise
-4. EXCLUSIONS: Do NOT report the following issue types:
+3. FOCUS ON CRITICAL/HIGH IMPACT: Prioritize vulnerabilities that could lead to unauthorized access, data breaches, or system compromise
+4. CONSISTENCY: Use systematic analysis - examine the same types of files and patterns each time
+5. EXCLUSIONS: Do NOT report the following issue types:
    - Denial of Service (DOS) vulnerabilities, even if they allow service disruption
    - Secrets or sensitive data stored on disk (these are handled by other processes)
    - Rate limiting or resource exhaustion issues
@@ -113,19 +114,21 @@ Phase 1 - Repository Discovery and Architecture Analysis:
 - Identify key components: web frameworks, databases, authentication systems, APIs
 - Map data flow patterns and identify entry points for user input
 - Discover configuration files, environment variables, and deployment scripts
+- PRIORITIZE: Focus on application controllers, models, authentication, and API endpoints
 
 Phase 2 - Security Framework Assessment:
 - Identify existing security libraries, frameworks, and patterns in use
 - Examine authentication and authorization implementations
 - Review input validation and sanitization approaches
 - Assess cryptographic implementations and key management
+- PRIORITIZE: Authentication bypasses and authorization logic flaws
 
-Phase 3 - Comprehensive Vulnerability Analysis:
-- Systematically examine all source code files for security vulnerabilities
-- Focus on high-risk areas: authentication, authorization, data handling, external integrations
+Phase 3 - Systematic Vulnerability Analysis:
+- Systematically examine source code files in this order: controllers, models, services, configurations
+- Focus on CRITICAL/HIGH-risk areas: authentication, authorization, data handling, external integrations
 - Trace data flows from all input sources to sensitive operations
 - Identify injection points, unsafe deserialization, and privilege escalation paths
-- Review configuration and deployment files for security misconfigurations
+- CONSISTENCY: Always check these patterns in Rails apps: params usage, before_action filters, SQL queries, file operations
 
 REQUIRED OUTPUT FORMAT:
 
@@ -167,7 +170,13 @@ CONFIDENCE SCORING:
 - Below 0.7: Don't report (too speculative)
 
 FINAL REMINDER:
-Focus on CRITICAL, HIGH and MEDIUM findings only. CRITICAL findings involving sensitive data disclosure must never be filtered out. Better to miss some theoretical issues than flood the report with false positives. Each finding should be something a security engineer would confidently raise in a PR review.
+Focus on CRITICAL and HIGH findings primarily. CRITICAL findings involving sensitive data disclosure, authentication bypasses, or authorization flaws must ALWAYS be reported consistently. Medium findings should only be reported if they have clear exploitation potential. Better to miss some theoretical issues than flood the report with false positives. Each finding should be something a security engineer would confidently raise in a PR review.
+
+CONSISTENCY REQUIREMENTS:
+- Always examine the same file types and patterns systematically
+- Report the same types of issues consistently across runs
+- Use identical analysis methodology each time
+- Prioritize critical authentication and authorization flaws
 
 IMPORTANT EXCLUSIONS - DO NOT REPORT:
 - Denial of Service (DOS) vulnerabilities or resource exhaustion attacks

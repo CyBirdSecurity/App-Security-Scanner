@@ -69,9 +69,20 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
                 "startLine": f["line"]
             }
 
-        # Generate partial fingerprint for result tracking
-        fingerprint_data = f"{file_path}:{f.get('line', 0)}:{rule_id}:{message_text}"
+        # Generate stable partial fingerprint for result tracking
+        # Use only stable elements: file path, line number, rule category, and core description
+        core_description = f.get("description", "").split("(confidence:")[0].strip()  # Remove dynamic confidence info
+        # Normalize description: remove extra whitespace and convert to lowercase for consistency
+        normalized_description = " ".join(core_description.lower().split())
+        fingerprint_data = f"{file_path}:{f.get('line', 0)}:{rule_id}:{normalized_description}"
         partial_fingerprint = hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
+        
+        # Create multiple fingerprints for better stability
+        line_based_fingerprint = partial_fingerprint
+        
+        # Content-based fingerprint (without line number for cases where lines shift)
+        content_fingerprint_data = f"{file_path}:{rule_id}:{normalized_description}"
+        content_fingerprint = hashlib.sha256(content_fingerprint_data.encode()).hexdigest()[:16]
         
         result = {
             "ruleId": str(rule_id),
@@ -79,7 +90,8 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
             "message": {"text": message_text},
             "locations": [location],
             "partialFingerprints": {
-                "primaryLocationLineHash": partial_fingerprint
+                "primaryLocationLineHash": line_based_fingerprint,
+                "primaryLocationContentHash": content_fingerprint
             }
         }
         extras = {}

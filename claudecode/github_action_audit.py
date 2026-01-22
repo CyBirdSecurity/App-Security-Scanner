@@ -220,15 +220,19 @@ class SimpleClaudeRunner:
             print(f"[Warning] Large prompt size: {prompt_size / 1024 / 1024:.2f}MB", file=sys.stderr)
 
         try:
+            # Use deterministic Claude model for consistent findings
+            claude_model = os.environ.get('CLAUDE_MODEL', DEFAULT_CLAUDE_MODEL)
             cmd = [
                 'claude',
                 '--output-format', 'json',
-                '--model', DEFAULT_CLAUDE_MODEL,
-                '--disallowed-tools', 'Bash(ps:*)'
+                '--model', claude_model,
+                '--disallowed-tools', 'Bash(ps:*)',
+                '--temperature', '0.1'  # Low temperature for deterministic results
             ]
 
-            NUM_RETRIES = 3
-            for attempt in range(NUM_RETRIES):
+            # For consistency, only retry on clear failures, not parsing issues
+            MAX_RETRIES = 2  # Reduced retries to avoid inconsistent results
+            for attempt in range(MAX_RETRIES):
                 result = subprocess.run(
                     cmd,
                     input=prompt,
@@ -239,13 +243,13 @@ class SimpleClaudeRunner:
                 )
 
                 if result.returncode != 0:
-                    if attempt == NUM_RETRIES - 1:
+                    if attempt == MAX_RETRIES - 1:
                         error_details = f"Claude Code execution failed with return code {result.returncode}\n"
                         error_details += f"Stderr: {result.stderr}\n"
                         error_details += f"Stdout: {result.stdout[:500]}..."
                         return False, error_details, {}
                     else:
-                        time.sleep(5*attempt)
+                        time.sleep(10)  # Fixed retry delay for consistency
                         continue
 
                 success, parsed_result = parse_json_with_fallbacks(result.stdout, "Claude Code output")
@@ -258,21 +262,21 @@ class SimpleClaudeRunner:
                         parsed_result.get('result') == 'Prompt is too long'):
                         return False, "PROMPT_TOO_LONG", {}
 
+                    # Only retry on clear execution errors, not normal results
                     if (isinstance(parsed_result, dict) and 
                         parsed_result.get('type') == 'result' and 
                         parsed_result.get('subtype') == 'error_during_execution' and
                         attempt == 0):
+                        time.sleep(10)
                         continue
 
                     parsed_results = self._extract_security_findings(parsed_result)
                     return True, "", parsed_results
                 else:
-                    if attempt == 0:
-                        continue
-                    else:
-                        return False, "Failed to parse Claude output", {}
+                    # Don't retry parsing failures - they may indicate model inconsistency
+                    return False, f"Failed to parse Claude output on attempt {attempt + 1}", {}
 
-            return False, "Unexpected error in retry logic", {}
+            return False, "Max retries exceeded", {}
 
         except subprocess.TimeoutExpired:
             return False, f"Claude Code execution timed out after {self.timeout_seconds // 60} minutes", {}
@@ -484,6 +488,11 @@ def main():
 
         prompt = get_security_audit_prompt(repo_data, custom_scan_instructions=custom_scan_instructions)
 
+        # Log scan configuration for consistency debugging
+        print(f"[Info] Using Claude model: {os.environ.get('CLAUDE_MODEL', DEFAULT_CLAUDE_MODEL)}", file=sys.stderr)
+        print(f"[Info] Prompt size: {len(prompt)} characters", file=sys.stderr)
+        print(f"[Info] Scanning repository: {repo_name}", file=sys.stderr)
+        
         repo_path = os.environ.get('REPO_PATH')
         repo_dir = Path(repo_path) if repo_path else Path.cwd()
         success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)

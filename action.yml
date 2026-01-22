@@ -48,6 +48,11 @@ inputs:
     required: false
     default: ''
 
+  review-existing-alerts:
+    description: 'Whether to review and persist existing open Code Scanning alerts'
+    required: false
+    default: 'true'
+
 outputs:
   findings-count:
     description: 'Number of security findings'
@@ -110,27 +115,6 @@ runs:
         ref: ${{ steps.scan-branch.outputs.scan_branch }}
         fetch-depth: 0
     
-    - name: Restore previous security baseline
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: |
-        echo "::group::Restore Security Baseline"
-        # Try to download baseline from most recent successful run
-        if gh run list --repo ${{ github.repository }} --workflow="${{ github.workflow }}" --status=success --limit=5 --json databaseId | \
-           jq -r '.[].databaseId' | while read run_id; do
-          echo "Checking run $run_id for baseline..."
-          if gh run download "$run_id" --repo ${{ github.repository }} --name security-review-results --dir /tmp/baseline 2>/dev/null; then
-            if [ -f /tmp/baseline/.security_baseline.json ]; then
-              echo "Found baseline from run $run_id, restoring..."
-              cp /tmp/baseline/.security_baseline.json ${{ github.workspace }}/.security_baseline.json
-              echo "Baseline restored successfully"
-              break
-            fi
-          fi
-        done || echo "No previous baseline found, will create new one"
-        echo "::endgroup::"
-        
     - name: Run Claude Security Scanner
       id: claudecode-scan
       shell: bash
@@ -148,6 +132,7 @@ runs:
         SCAN_BRANCH: ${{ steps.scan-branch.outputs.scan_branch }}
         UPLOAD_RESULTS_TO_REPO: ${{ inputs.upload-sarif }}
         SARIF_OUTPUT_PATH: claude-security-findings.sarif
+        REVIEW_EXISTING_ALERTS: ${{ inputs.review-existing-alerts }}
       run: |
         echo "Running Claude AI comprehensive security analysis..."
         echo "Repository: $GITHUB_REPOSITORY"
@@ -269,7 +254,6 @@ runs:
           findings.json
           claudecode-results.json
           claudecode-error.log
-          .security_baseline.json
         retention-days: 7
         if-no-files-found: ignore
     

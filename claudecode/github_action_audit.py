@@ -28,7 +28,7 @@ from claudecode.constants import (
 )
 from claudecode.logger import get_logger
 from claudecode.sarif_utils import findings_to_sarif_string
-from claudecode.baseline_validator import BaselineValidator
+from claudecode.alert_reviewer import integrate_alert_review
 
 logger = get_logger(__name__)
 
@@ -627,15 +627,27 @@ def main():
             filtered_findings = original_findings
             excluded_findings = []
         
-        # Apply baseline validation to ensure critical findings persist
-        try:
-            workspace_path = os.environ.get('GITHUB_WORKSPACE')
-            baseline_validator = BaselineValidator(workspace_path)
-            filtered_findings = baseline_validator.validate_findings(filtered_findings)
-            logger.info("Baseline validation completed successfully")
-        except Exception as e:
-            logger.warning(f"Baseline validation failed: {e}")
-            # Continue with original findings if baseline validation fails
+        # Review and persist existing Code Scanning alerts if enabled
+        review_alerts = os.environ.get('REVIEW_EXISTING_ALERTS', 'true').lower() == 'true'
+        if review_alerts:
+            try:
+                print(f"[Info] Reviewing existing Code Scanning alerts for persistence", file=sys.stderr)
+                github_token = os.environ.get('GITHUB_TOKEN')
+                if github_token:
+                    original_count = len(filtered_findings)
+                    filtered_findings = integrate_alert_review(
+                        github_token, repo_name, repo_dir, filtered_findings
+                    )
+                    added_count = len(filtered_findings) - original_count
+                    print(f"[Info] Added {added_count} persistent alerts from existing Code Scanning alerts", file=sys.stderr)
+                    logger.info("Alert review and persistence completed successfully")
+                else:
+                    logger.warning("GITHUB_TOKEN not available, skipping alert review")
+            except Exception as e:
+                logger.warning(f"Alert review failed: {e}")
+                # Continue with current findings if alert review fails
+        else:
+            logger.info("Alert review disabled, skipping existing alerts check")
         
         # Calculate severity counts from filtered findings
         severity_counts = {'critical_severity': 0, 'high_severity': 0, 'medium_severity': 0, 'low_severity': 0}

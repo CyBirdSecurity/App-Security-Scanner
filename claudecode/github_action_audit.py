@@ -496,8 +496,8 @@ def main():
         repo_path = os.environ.get('REPO_PATH')
         repo_dir = Path(repo_path) if repo_path else Path.cwd()
         
-        # Retry logic for incomplete analyses
-        MAX_ANALYSIS_ATTEMPTS = 2
+        # Enhanced retry logic for incomplete analyses
+        MAX_ANALYSIS_ATTEMPTS = 3  # Increased attempts for better consistency
         for attempt in range(MAX_ANALYSIS_ATTEMPTS):
             success, error_msg, results = claude_runner.run_security_audit(repo_dir, prompt)
 
@@ -515,41 +515,69 @@ def main():
                     print(json.dumps({'error': f'Security audit failed after {MAX_ANALYSIS_ATTEMPTS} attempts: {error_msg}'}))
                     sys.exit(EXIT_GENERAL_ERROR)
             
-            # Check if analysis appears complete based on percentage coverage
+            # Enhanced completeness validation with stricter requirements
             analysis_summary = results.get('analysis_summary', {})
             files_reviewed = analysis_summary.get('files_reviewed', 0)
+            claude_coverage = analysis_summary.get('coverage_percentage', 0)
             
             # Calculate expected file count for retry logic
             retry_needed = False
-            if (attempt < MAX_ANALYSIS_ATTEMPTS - 1 and 
-                repo_data.get('language', '').lower() == 'ruby'):
+            if attempt < MAX_ANALYSIS_ATTEMPTS - 1:
                 try:
-                    # Quick estimate of total application files for retry decision
-                    controller_count = subprocess.run(
-                        ['find', repo_dir, '-path', '*/app/controllers/*.rb', '-type', 'f'], 
-                        capture_output=True, text=True
-                    ).stdout.count('\n')
-                    model_count = subprocess.run(
-                        ['find', repo_dir, '-path', '*/app/models/*.rb', '-type', 'f'], 
-                        capture_output=True, text=True
-                    ).stdout.count('\n')
-                    
-                    # Minimum expectation: at least 50% of critical files (controllers + models)
-                    min_critical_files = max(5, (controller_count + model_count) // 2)
-                    
-                    if files_reviewed < min_critical_files:
-                        retry_needed = True
-                        coverage_pct = (files_reviewed / (controller_count + model_count) * 100) if (controller_count + model_count) > 0 else 0
-                        print(f"[Warning] Analysis attempt {attempt + 1} appears incomplete: {files_reviewed} files reviewed ({coverage_pct:.1f}% of critical files). Retrying...", file=sys.stderr)
+                    # Enhanced file counting for better validation
+                    if repo_data.get('language', '').lower() == 'ruby':
+                        # Count all Ruby files in application
+                        controller_count = subprocess.run(
+                            ['find', repo_dir, '-path', '*/app/controllers/*.rb', '-type', 'f'], 
+                            capture_output=True, text=True
+                        ).stdout.count('\n')
+                        model_count = subprocess.run(
+                            ['find', repo_dir, '-path', '*/app/models/*.rb', '-type', 'f'], 
+                            capture_output=True, text=True
+                        ).stdout.count('\n')
+                        config_count = subprocess.run(
+                            ['find', repo_dir, '-path', '*/config/*.rb', '-type', 'f'], 
+                            capture_output=True, text=True
+                        ).stdout.count('\n')
+                        lib_count = subprocess.run(
+                            ['find', repo_dir, '-path', '*/lib/*.rb', '-o', '-path', '*/app/services/*.rb', '-o', '-path', '*/app/lib/*.rb', '-type', 'f'], 
+                            capture_output=True, text=True
+                        ).stdout.count('\n')
                         
+                        # Enhanced thresholds for completeness
+                        total_app_files = controller_count + model_count + config_count + lib_count
+                        expected_min_files = max(50, int(total_app_files * 0.8))  # Minimum 50 files or 80% coverage
+                        
+                        # Multiple retry conditions
+                        insufficient_files = files_reviewed < expected_min_files
+                        low_coverage = claude_coverage < 80.0 and claude_coverage > 0
+                        very_low_coverage = files_reviewed < 30  # Absolute minimum
+                        
+                        if insufficient_files or low_coverage or very_low_coverage:
+                            retry_needed = True
+                            actual_coverage = (files_reviewed / total_app_files * 100) if total_app_files > 0 else 0
+                            print(f"[Warning] Analysis attempt {attempt + 1} appears incomplete:", file=sys.stderr)
+                            print(f"  - Files reviewed: {files_reviewed} (expected minimum: {expected_min_files})", file=sys.stderr)
+                            print(f"  - Calculated coverage: {actual_coverage:.1f}% (target: 80%)", file=sys.stderr)
+                            print(f"  - Claude reported coverage: {claude_coverage:.1f}%", file=sys.stderr)
+                            print(f"  - Total app files found: {total_app_files} (controllers: {controller_count}, models: {model_count})", file=sys.stderr)
+                    else:
+                        # For non-Ruby projects, use generic file count validation
+                        if files_reviewed < 30 or (claude_coverage < 50.0 and claude_coverage > 0):
+                            retry_needed = True
+                            print(f"[Warning] Analysis attempt {attempt + 1} appears incomplete: {files_reviewed} files reviewed, {claude_coverage:.1f}% coverage. Retrying...", file=sys.stderr)
+                            
                 except Exception as e:
-                    # Fallback to simple file count check
-                    if files_reviewed < 20:  # Very conservative fallback
+                    # Enhanced fallback validation
+                    if files_reviewed < 25 or claude_coverage < 30.0:
                         retry_needed = True
-                        print(f"[Warning] Analysis attempt {attempt + 1} appears incomplete (only {files_reviewed} files reviewed). Retrying...", file=sys.stderr)
+                        print(f"[Warning] Analysis attempt {attempt + 1} appears incomplete (only {files_reviewed} files reviewed, {claude_coverage:.1f}% coverage). Retrying...", file=sys.stderr)
             
             if retry_needed:
-                time.sleep(15)  # Longer delay for incomplete analysis retry
+                # Progressive retry delay for better consistency 
+                retry_delay = 10 + (attempt * 10)  # 10s, 20s, 30s
+                print(f"[Info] Waiting {retry_delay}s before retry attempt {attempt + 2}...", file=sys.stderr)
+                time.sleep(retry_delay)
                 continue
             
             # Analysis succeeded and appears reasonably complete
@@ -587,15 +615,15 @@ def main():
                 critical_files = controller_count + model_count + config_count
                 total_app_files = critical_files + lib_count
                 
-                # Expected coverage: 75% of total application files, 100% of critical files
-                expected_min_files = int(total_app_files * 0.75)
+                # Expected coverage: 80% of total application files, 100% of critical files
+                expected_min_files = int(total_app_files * 0.8)  # Increased threshold
                 critical_coverage_required = critical_files  # 100% of critical files
                 
                 coverage_percentage = (files_reviewed / total_app_files * 100) if total_app_files > 0 else 0
                 
                 if files_reviewed < expected_min_files:
                     print(f"[Warning] Incomplete analysis: reviewed {files_reviewed} files ({coverage_percentage:.1f}% coverage)", file=sys.stderr)
-                    print(f"[Info] Expected minimum 75% coverage: {expected_min_files} files", file=sys.stderr)
+                    print(f"[Info] Expected minimum 80% coverage: {expected_min_files} files", file=sys.stderr)
                     print(f"[Info] Critical files - Controllers: {controller_count}, Models: {model_count}, Config: {config_count}", file=sys.stderr)
                     if claude_reported_coverage > 0:
                         print(f"[Info] Claude reported coverage: {claude_reported_coverage:.1f}%", file=sys.stderr)
@@ -603,6 +631,14 @@ def main():
                     print(f"[Info] Analysis coverage: {coverage_percentage:.1f}% ({files_reviewed}/{total_app_files} files)", file=sys.stderr)
                     if claude_reported_coverage > 0:
                         print(f"[Info] Claude reported coverage: {claude_reported_coverage:.1f}%", file=sys.stderr)
+                    
+                    # Log additional completeness metrics for debugging
+                    if coverage_percentage >= 80.0:
+                        print(f"[Success] Achieved target coverage threshold (≥80%)", file=sys.stderr)
+                    elif coverage_percentage >= 60.0:
+                        print(f"[Warning] Below target but acceptable coverage (≥60%)", file=sys.stderr)
+                    else:
+                        print(f"[Error] Critically low coverage (<60%) - findings may be incomplete", file=sys.stderr)
                 
             except Exception as e:
                 logger.warning(f"Failed to validate analysis completeness: {e}")

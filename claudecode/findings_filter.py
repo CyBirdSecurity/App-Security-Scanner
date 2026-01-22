@@ -104,15 +104,21 @@ class HardExclusionRules:
             
         combined_text = f"{title} {description}".lower()
         
-        # Check DOS patterns
+        # Check DOS patterns (but allow some DOS findings that may be valid)
         for pattern in cls._DOS_PATTERNS:
             if pattern.search(combined_text):
+                # Don't exclude if it's part of an injection attack that could also cause RCE
+                if any(injection_term in combined_text for injection_term in ['injection', 'execute', 'command', 'sql']):
+                    continue  # Keep potential injection-based DOS
                 return "Generic DOS/resource exhaustion finding (low signal)"
         
         
-        # Check rate limiting patterns  
+        # Check rate limiting patterns (be more selective)
         for pattern in cls._RATE_LIMITING_PATTERNS:
             if pattern.search(combined_text):
+                # Don't exclude if it's about API authentication bypass or similar security issue
+                if any(security_term in combined_text for security_term in ['authentication', 'authorization', 'bypass', 'injection']):
+                    continue  # Keep security-related findings even if mentioning rate limiting
                 return "Generic rate limiting recommendation"
         
         # Check resource patterns - always exclude
@@ -232,18 +238,30 @@ class FindingsFilter:
         
         if self.use_hard_exclusions:
             for i, finding in enumerate(findings):
-                # Never exclude CRITICAL severity findings or HIGH severity auth/authz findings
+                # Never exclude CRITICAL/HIGH severity findings or important auth/authz findings
                 severity = finding.get('severity', '').upper()
                 category = finding.get('category', '').lower()
+                description = finding.get('description', '').lower()
                 
                 # Critical finding categories that should never be filtered
                 critical_categories = {
                     'authentication_bypass', 'authorization_bypass', 'auth_bypass', 
-                    'privilege_escalation', 'idor', 'access_control_bypass'
+                    'privilege_escalation', 'idor', 'access_control_bypass',
+                    'sql_injection', 'code_injection', 'command_injection',
+                    'rce', 'remote_code_execution', 'deserialization'
                 }
                 
-                if (severity == 'CRITICAL' or 
-                    (severity == 'HIGH' and category in critical_categories)):
+                # Also protect findings with critical keywords in description
+                critical_keywords = {
+                    'authentication', 'authorization', 'privilege', 'bypass', 
+                    'injection', 'rce', 'code execution', 'deseriali'
+                }
+                
+                has_critical_keyword = any(keyword in description for keyword in critical_keywords)
+                
+                if (severity in ['CRITICAL', 'HIGH'] or 
+                    category in critical_categories or
+                    has_critical_keyword):
                     findings_after_hard.append((i, finding))
                     continue
                 
@@ -276,22 +294,34 @@ class FindingsFilter:
             logger.info(f"Processing {len(findings_after_hard)} findings individually through Claude API")
             
             for orig_idx, finding in findings_after_hard:
-                # Never exclude CRITICAL or HIGH severity authentication/authorization findings from Claude filtering
+                # Never exclude CRITICAL/HIGH severity or important security findings from Claude filtering
                 severity = finding.get('severity', '').upper()
                 category = finding.get('category', '').lower()
+                description = finding.get('description', '').lower()
                 
                 # Critical finding categories that should never be filtered
                 critical_categories = {
                     'authentication_bypass', 'authorization_bypass', 'auth_bypass', 
-                    'privilege_escalation', 'idor', 'access_control_bypass'
+                    'privilege_escalation', 'idor', 'access_control_bypass',
+                    'sql_injection', 'code_injection', 'command_injection',
+                    'rce', 'remote_code_execution', 'deserialization'
                 }
                 
-                if (severity == 'CRITICAL' or 
-                    (severity == 'HIGH' and category in critical_categories)):
+                # Also protect findings with critical keywords in description
+                critical_keywords = {
+                    'authentication', 'authorization', 'privilege', 'bypass', 
+                    'injection', 'rce', 'code execution', 'deseriali'
+                }
+                
+                has_critical_keyword = any(keyword in description for keyword in critical_keywords)
+                
+                if (severity in ['CRITICAL', 'HIGH'] or 
+                    category in critical_categories or
+                    has_critical_keyword):
                     enriched_finding = finding.copy()
                     enriched_finding['_filter_metadata'] = {
                         'confidence_score': 10.0,  # Always highest confidence 
-                        'justification': f'{severity} severity {category} - never filtered',
+                        'justification': f'{severity} severity {category} - never filtered due to high impact',
                     }
                     findings_after_claude.append(enriched_finding)
                     stats.kept_findings += 1
@@ -311,16 +341,29 @@ class FindingsFilter:
                     
                     stats.confidence_scores.append(confidence)
                     
+                    # Apply more conservative Claude filtering for MEDIUM+ findings
+                    finding_severity = finding.get('severity', '').upper()
                     if not keep_finding:
-                        # Claude recommends excluding
-                        excluded_claude.append({
-                            "finding": finding,
-                            "confidence_score": confidence,
-                            "exclusion_reason": exclusion_reason or f"Low confidence score: {confidence}",
-                            "justification": justification,
-                            "filter_stage": "claude_api"
-                        })
-                        stats.claude_excluded += 1
+                        # For MEDIUM+ findings, require higher confidence to exclude
+                        if finding_severity in ['MEDIUM', 'HIGH', 'CRITICAL'] and confidence >= 6.0:
+                            # Keep medium+ findings unless Claude is very confident they're false positives
+                            enriched_finding = finding.copy()
+                            enriched_finding['_filter_metadata'] = {
+                                'confidence_score': confidence,
+                                'justification': f'Kept {finding_severity} finding despite Claude recommendation (confidence: {confidence})',
+                            }
+                            findings_after_claude.append(enriched_finding)
+                            stats.kept_findings += 1
+                        else:
+                            # Claude recommends excluding (low severity or high confidence exclusion)
+                            excluded_claude.append({
+                                "finding": finding,
+                                "confidence_score": confidence,
+                                "exclusion_reason": exclusion_reason or f"Low confidence score: {confidence}",
+                                "justification": justification,
+                                "filter_stage": "claude_api"
+                            })
+                            stats.claude_excluded += 1
                     else:
                         # Keep finding with metadata
                         enriched_finding = finding.copy()

@@ -17,6 +17,7 @@ PROMPT_TOKEN_LIMIT = 16384  # 16k tokens max for claude-opus-4
 EXIT_SUCCESS = 0
 EXIT_GENERAL_ERROR = 1
 EXIT_CONFIGURATION_ERROR = 2
+EXIT_HIGH_SEVERITY_FOUND = 3
 
 # Subprocess Configuration
 SUBPROCESS_TIMEOUT = 1200  # 20 minutes for Claude Code execution

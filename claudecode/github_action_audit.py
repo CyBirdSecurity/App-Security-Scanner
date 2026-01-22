@@ -23,6 +23,7 @@ from claudecode.constants import (
     DEFAULT_CLAUDE_MODEL,
     EXIT_SUCCESS,
     EXIT_GENERAL_ERROR,
+    EXIT_HIGH_SEVERITY_FOUND,
     SUBPROCESS_TIMEOUT
 )
 from claudecode.logger import get_logger
@@ -549,7 +550,15 @@ def main():
         # Generate SARIF output for Code Scanning
         upload_results = os.environ.get('UPLOAD_RESULTS_TO_REPO', '').lower() in ['1', 'true', 'yes']
         if upload_results:
-            sarif_output_path = os.environ.get('SARIF_OUTPUT_PATH', 'claude-security-findings.sarif')
+            sarif_filename = os.environ.get('SARIF_OUTPUT_PATH', 'claude-security-findings.sarif')
+            
+            # Write SARIF file to workspace root (where GitHub Action expects it)
+            workspace_path = os.environ.get('GITHUB_WORKSPACE')
+            if workspace_path:
+                sarif_output_path = os.path.join(workspace_path, sarif_filename)
+            else:
+                # Fallback to current working directory if GITHUB_WORKSPACE not set
+                sarif_output_path = sarif_filename
             
             # Generate SARIF content with proper tool information
             from claudecode.sarif_utils import findings_to_sarif_string

@@ -252,8 +252,8 @@ runs:
         if-no-files-found: ignore
     
     - name: Upload SARIF to GitHub Code Scanning
-      if: inputs.upload-sarif == 'true' && always()
-      uses: github/codeql-action/upload-sarif@v3
+      if: inputs.upload-sarif == 'true' && always() && hashFiles('claude-security-findings.sarif') != ''
+      uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: claude-security-findings.sarif
         category: Claude-Security-Scanner

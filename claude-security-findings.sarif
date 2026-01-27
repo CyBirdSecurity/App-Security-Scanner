@@ -1,0 +1,183 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://www.schemastore.org/schemas/json/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Claude Security Scanner",
+          "fullName": "Claude Security Scanner",
+          "version": "1.0.0",
+          "semanticVersion": "1.0.0",
+          "informationUri": "https://github.com/CyBirdSecurity/Claude-Security-Scanner",
+          "rules": [
+            {
+              "id": "authentication_bypass",
+              "name": "Authentication Bypass",
+              "shortDescription": {
+                "text": "Authentication can be completely disabled via configuration flag, allowing automatic login as admin@example.com without any credentials"
+              },
+              "fullDescription": {
+                "text": "Authentication can be completely disabled via configuration flag, allowing automatic login as admin@example.com without any credentials\n\n**Recommendation:** Remove the authentication bypass feature entirely or ensure it can only be enabled in non-production environments through code-level checks rather than configuration. Add validation to prevent this flag from being enabled in production deployments."
+              },
+              "help": {
+                "text": "Authentication can be completely disabled via configuration flag, allowing automatic login as admin@example.com without any credentials\n\n**Recommendation:** Remove the authentication bypass feature entirely or ensure it can only be enabled in non-production environments through code-level checks rather than configuration. Add validation to prevent this flag from being enabled in production deployments."
+              },
+              "properties": {
+                "security-severity": "critical"
+              }
+            },
+            {
+              "id": "server_side_request_forgery",
+              "name": "Server Side Request Forgery",
+              "shortDescription": {
+                "text": "User email parameter directly interpolated into JIRA API URL without encoding, enabling potential SSRF or injection attacks"
+              },
+              "fullDescription": {
+                "text": "User email parameter directly interpolated into JIRA API URL without encoding, enabling potential SSRF or injection attacks\n\n**Recommendation:** Use proper URL encoding via CGI.escape() or URI.encode_www_form_component() for the email parameter before interpolating into the URL. Example: req.params['query'] = email instead of string interpolation."
+              },
+              "help": {
+                "text": "User email parameter directly interpolated into JIRA API URL without encoding, enabling potential SSRF or injection attacks\n\n**Recommendation:** Use proper URL encoding via CGI.escape() or URI.encode_www_form_component() for the email parameter before interpolating into the URL. Example: req.params['query'] = email instead of string interpolation."
+              },
+              "properties": {
+                "security-severity": "high"
+              }
+            },
+            {
+              "id": "sql_injection",
+              "name": "Sql Injection",
+              "shortDescription": {
+                "text": "SQL WHERE clause uses string interpolation with user-controlled params[:teams] that is sanitized but uses a complex transformation that could be bypassed"
+              },
+              "fullDescription": {
+                "text": "SQL WHERE clause uses string interpolation with user-controlled params[:teams] that is sanitized but uses a complex transformation that could be bypassed\n\n**Recommendation:** Simplify the query logic to reduce attack surface. Consider using ActiveRecord's safer query methods like: Team.where('LOWER(name) IN (?)', params[:teams].split(',').map(&:strip).map(&:downcase)) or add explicit validation on params[:teams] to only allow alphanumeric characters and commas."
+              },
+              "help": {
+                "text": "SQL WHERE clause uses string interpolation with user-controlled params[:teams] that is sanitized but uses a complex transformation that could be bypassed\n\n**Recommendation:** Simplify the query logic to reduce attack surface. Consider using ActiveRecord's safer query methods like: Team.where('LOWER(name) IN (?)', params[:teams].split(',').map(&:strip).map(&:downcase)) or add explicit validation on params[:teams] to only allow alphanumeric characters and commas."
+              },
+              "properties": {
+                "security-severity": "medium"
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "startTimeUtc": "2026-01-27T01:13:57.073530Z"
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "authentication_bypass",
+          "level": "warning",
+          "message": {
+            "text": "Authentication can be completely disabled via configuration flag, allowing automatic login as admin@example.com without any credentials (confidence: 0.85)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/controllers/application_controller.rb"
+                },
+                "region": {
+                  "startLine": 26
+                }
+              }
+            }
+          ],
+          "fingerprints": {
+            "claude-scanner/v1": "claude-1fa587522ded91a7-55dbef26-144afb28"
+          },
+          "properties": {
+            "security-severity": "critical",
+            "claude_finding": {
+              "severity": "CRITICAL",
+              "category": "authentication_bypass",
+              "confidence": 0.85,
+              "description": "Authentication can be completely disabled via configuration flag, allowing automatic login as admin@example.com without any credentials"
+            },
+            "claude_fingerprint_info": {
+              "generated_at": "2026-01-27T01:13:57.073530Z",
+              "scanner_version": "claude-security-scanner-v1.0",
+              "fingerprint_method": "claude-scanner/v1"
+            }
+          }
+        },
+        {
+          "ruleId": "server_side_request_forgery",
+          "level": "warning",
+          "message": {
+            "text": "User email parameter directly interpolated into JIRA API URL without encoding, enabling potential SSRF or injection attacks (confidence: 0.88)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/jira_client.rb"
+                },
+                "region": {
+                  "startLine": 20
+                }
+              }
+            }
+          ],
+          "fingerprints": {
+            "claude-scanner/v1": "claude-8b2c41d2851f8a4f-55dbef26-7153ff8c"
+          },
+          "properties": {
+            "security-severity": "high",
+            "claude_finding": {
+              "severity": "HIGH",
+              "category": "server_side_request_forgery",
+              "confidence": 0.88,
+              "description": "User email parameter directly interpolated into JIRA API URL without encoding, enabling potential SSRF or injection attacks"
+            },
+            "claude_fingerprint_info": {
+              "generated_at": "2026-01-27T01:13:57.073530Z",
+              "scanner_version": "claude-security-scanner-v1.0",
+              "fingerprint_method": "claude-scanner/v1"
+            }
+          }
+        },
+        {
+          "ruleId": "sql_injection",
+          "level": "warning",
+          "message": {
+            "text": "SQL WHERE clause uses string interpolation with user-controlled params[:teams] that is sanitized but uses a complex transformation that could be bypassed (confidence: 0.72)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/controllers/teams_controller.rb"
+                },
+                "region": {
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "fingerprints": {
+            "claude-scanner/v1": "claude-7b711bfad73708ef-55dbef26-1d5ca1de"
+          },
+          "properties": {
+            "security-severity": "medium",
+            "claude_finding": {
+              "severity": "MEDIUM",
+              "category": "sql_injection",
+              "confidence": 0.72,
+              "description": "SQL WHERE clause uses string interpolation with user-controlled params[:teams] that is sanitized but uses a complex transformation that could be bypassed"
+            },
+            "claude_fingerprint_info": {
+              "generated_at": "2026-01-27T01:13:57.073530Z",
+              "scanner_version": "claude-security-scanner-v1.0",
+              "fingerprint_method": "claude-scanner/v1"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

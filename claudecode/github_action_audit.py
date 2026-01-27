@@ -726,16 +726,37 @@ def main():
                 # Fallback to current working directory if GITHUB_WORKSPACE not set
                 sarif_output_path = sarif_filename
             
-            # Generate SARIF content with proper tool information
+            # Initialize fingerprint manager to maintain consistency for existing alerts
+            fingerprint_manager = None
+            github_token = os.environ.get('GITHUB_TOKEN')
+            if github_token:
+                try:
+                    from claudecode.fingerprint_manager import FingerprintManager
+                    fingerprint_manager = FingerprintManager(github_token, repo_name)
+                    existing_count = fingerprint_manager.load_existing_fingerprints()
+                    print(f"[Info] Loaded {existing_count} existing alert fingerprints for consistency", file=sys.stderr)
+                    logger.info(f"Fingerprint manager loaded {existing_count} existing alert fingerprints")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize fingerprint manager: {e}")
+                    print(f"[Warning] Fingerprint manager initialization failed: {e}", file=sys.stderr)
+            
+            # Generate SARIF content with fingerprint management
             from claudecode.sarif_utils import findings_to_sarif_string
             sarif_content = findings_to_sarif_string(
                 filtered_findings, 
-                tool_name="Claude Security Scanner"
+                tool_name="Claude Security Scanner",
+                fingerprint_manager=fingerprint_manager
             )
             
             # Write SARIF file to workspace root for Code Scanning pickup
             with open(sarif_output_path, 'w', encoding='utf-8') as f:
                 f.write(sarif_content)
+            
+            # Log fingerprint statistics
+            if fingerprint_manager:
+                stats = fingerprint_manager.get_fingerprint_stats()
+                logger.info(f"SARIF generated with fingerprint stats: {stats}")
+                print(f"[Info] Fingerprint stats: {stats['existing_fingerprints_loaded']} existing alerts preserved", file=sys.stderr)
             
             logger.info(f"SARIF results written to {sarif_output_path} for GitHub Code Scanning")
 

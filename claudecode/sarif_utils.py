@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 import json
 import datetime
 import hashlib
+import uuid
 
 def _severity_to_level(severity: str) -> str:
     # For security vulnerabilities, use 'warning' level with security severity
@@ -30,10 +31,60 @@ def _get_security_severity(severity: str) -> str:
         return "low"
     return "low"
 
+def _generate_custom_fingerprint(finding: Dict[str, Any], timestamp: str) -> str:
+    """
+    Generate a unique custom fingerprint for the finding to prevent GitHub from
+    incorrectly correlating with previously closed alerts.
+    
+    Uses a combination of:
+    - File path + line number (location)
+    - Rule category (vulnerability type) 
+    - Core description content (first 100 chars)
+    - Timestamp (to ensure uniqueness across runs)
+    - Random UUID component (final uniqueness guarantee)
+    """
+    file_path = finding.get("file", "unknown")
+    line = str(finding.get("line", 0))
+    category = finding.get("category", "unknown")
+    description = finding.get("description", "")[:100]  # First 100 chars
+    
+    # Create a deterministic part based on the actual finding
+    content_hash = hashlib.sha256(
+        f"{file_path}:{line}:{category}:{description}".encode('utf-8')
+    ).hexdigest()[:16]
+    
+    # Add timestamp and random component for uniqueness
+    unique_id = str(uuid.uuid4())[:8]
+    timestamp_hash = hashlib.md5(timestamp.encode('utf-8')).hexdigest()[:8]
+    
+    # Format: claude-{content_hash}-{timestamp_hash}-{unique_id}
+    fingerprint = f"claude-{content_hash}-{timestamp_hash}-{unique_id}"
+    
+    return fingerprint
+
 def findings_to_sarif(findings: List[Dict[str, Any]],
-                      tool_name: str = "Claude Code Security Reviewer",
-                      tool_full_name: Optional[str] = None) -> Dict[str, Any]:
-    timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+                      tool_name: str = "Claude Code Security Reviewer", 
+                      tool_full_name: Optional[str] = None,
+                      fingerprint_manager = None) -> Dict[str, Any]:
+    """
+    Convert security findings to SARIF 2.1.0 format with custom fingerprinting.
+    
+    This function generates custom fingerprints for each finding to prevent GitHub's
+    Code Scanning from incorrectly correlating new vulnerabilities with previously
+    closed alerts that have similar rule IDs or locations.
+    
+    Existing open alerts maintain their original fingerprints to prevent duplicates.
+    
+    Args:
+        findings: List of finding dictionaries from security scan
+        tool_name: Name of the security scanning tool
+        tool_full_name: Full name of the tool (defaults to tool_name)
+        fingerprint_manager: Optional FingerprintManager for existing alert handling
+        
+    Returns:
+        SARIF 2.1.0 compliant dictionary with custom fingerprints
+    """
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
     tool_full_name = tool_full_name or tool_name
     
     rules_map: Dict[str, Dict[str, Any]] = {}
@@ -88,14 +139,22 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
                 "startLine": f["line"]
             }
 
-        # Let GitHub calculate its own fingerprints - remove manual fingerprint calculation
-        # to avoid conflicts with existing fingerprints in GitHub Code Scanning
+        # Determine fingerprint - use existing for open alerts, new for others
+        if fingerprint_manager:
+            default_fingerprint = _generate_custom_fingerprint(f, timestamp)
+            fingerprint_to_use, is_existing = fingerprint_manager.get_fingerprint_for_finding(f, default_fingerprint)
+        else:
+            fingerprint_to_use = _generate_custom_fingerprint(f, timestamp)
+            is_existing = False
         
         result = {
             "ruleId": str(rule_id),
             "level": level,
             "message": {"text": message_text},
-            "locations": [location]
+            "locations": [location],
+            "fingerprints": {
+                "claude-scanner/v1": fingerprint_to_use
+            }
         }
         
         # Add security severity for vulnerability findings
@@ -109,7 +168,18 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
             if key in f:
                 extras[key] = f[key]
         if extras:
-            result["properties"] = {"claude_finding": extras}
+            result["properties"] = result.get("properties", {})
+            result["properties"]["claude_finding"] = extras
+            
+        # Add fingerprint metadata to properties for debugging
+        result["properties"] = result.get("properties", {})
+        result["properties"]["claude_fingerprint_info"] = {
+            "generated_at": timestamp,
+            "scanner_version": "claude-security-scanner-v1.0",
+            "fingerprint_method": "claude-scanner/v1",
+            "is_existing_alert": is_existing,
+            "fingerprint_source": "existing_alert" if is_existing else "new_generation"
+        }
 
         results.append(result)
 
@@ -141,6 +211,6 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
 
     return sarif
 
-def findings_to_sarif_string(findings: List[Dict[str, Any]], tool_name: str = "Claude Code Security Reviewer") -> str:
-    sarif = findings_to_sarif(findings, tool_name=tool_name)
+def findings_to_sarif_string(findings: List[Dict[str, Any]], tool_name: str = "Claude Code Security Reviewer", fingerprint_manager = None) -> str:
+    sarif = findings_to_sarif(findings, tool_name=tool_name, fingerprint_manager=fingerprint_manager)
     return json.dumps(sarif, indent=2, ensure_ascii=False)

@@ -741,12 +741,21 @@ def main():
                     print(f"[Warning] Fingerprint manager initialization failed: {e}", file=sys.stderr)
             
             # Generate SARIF content with fingerprint management
+            # Check if GitHub-compatible format should be used
+            use_github_compatible = os.environ.get('GITHUB_COMPATIBLE_SARIF', 'true').lower() in ['1', 'true', 'yes']
+            
             from claudecode.sarif_utils import findings_to_sarif_string
             sarif_content = findings_to_sarif_string(
                 filtered_findings, 
                 tool_name="Claude Security Scanner",
-                fingerprint_manager=fingerprint_manager
+                fingerprint_manager=fingerprint_manager,
+                use_github_compatible_format=use_github_compatible
             )
+            
+            # Log SARIF format being used
+            format_type = "GitHub-compatible" if use_github_compatible else "standard"
+            logger.info(f"Generated SARIF using {format_type} format")
+            print(f"[Info] Using {format_type} SARIF format", file=sys.stderr)
             
             # Write SARIF file to workspace root for Code Scanning pickup
             with open(sarif_output_path, 'w', encoding='utf-8') as f:

@@ -52,6 +52,11 @@ inputs:
     description: 'Whether to review and persist existing open Code Scanning alerts'
     required: false
     default: 'true'
+  
+  github-compatible-sarif:
+    description: 'Use GitHub-compatible SARIF format to address processing issues'
+    required: false
+    default: 'true'
 
 outputs:
   findings-count:
@@ -133,6 +138,7 @@ runs:
         UPLOAD_RESULTS_TO_REPO: ${{ inputs.upload-sarif }}
         SARIF_OUTPUT_PATH: claude-security-findings.sarif
         REVIEW_EXISTING_ALERTS: ${{ inputs.review-existing-alerts }}
+        GITHUB_COMPATIBLE_SARIF: ${{ inputs.github-compatible-sarif }}
       run: |
         echo "Running Claude AI comprehensive security analysis..."
         echo "Repository: $GITHUB_REPOSITORY"

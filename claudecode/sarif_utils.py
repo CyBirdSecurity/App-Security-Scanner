@@ -65,7 +65,8 @@ def _generate_custom_fingerprint(finding: Dict[str, Any], timestamp: str) -> str
 def findings_to_sarif(findings: List[Dict[str, Any]],
                       tool_name: str = "Claude Code Security Reviewer", 
                       tool_full_name: Optional[str] = None,
-                      fingerprint_manager = None) -> Dict[str, Any]:
+                      fingerprint_manager = None,
+                      use_github_compatible_format: bool = False) -> Dict[str, Any]:
     """
     Convert security findings to SARIF 2.1.0 format with custom fingerprinting.
     
@@ -86,6 +87,13 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
     """
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
     tool_full_name = tool_full_name or tool_name
+    
+    # Use GitHub-compatible format adjustments if requested
+    if use_github_compatible_format:
+        # Simplify tool name for better compatibility
+        if "Claude" in tool_name:
+            tool_name = "Claude-Scanner"
+            tool_full_name = "Claude Security Scanner"
     
     rules_map: Dict[str, Dict[str, Any]] = {}
     for f in findings:
@@ -151,11 +159,20 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
             "ruleId": str(rule_id),
             "level": level,
             "message": {"text": message_text},
-            "locations": [location],
-            "fingerprints": {
+            "locations": [location]
+        }
+        
+        # Add fingerprints - use GitHub-compatible format if requested
+        if use_github_compatible_format:
+            # Use partialFingerprints format that GitHub prefers
+            result["partialFingerprints"] = {
+                "primaryLocationLineHash": fingerprint_to_use
+            }
+        else:
+            # Use our custom fingerprint format
+            result["fingerprints"] = {
                 "claude-scanner/v1": fingerprint_to_use
             }
-        }
         
         # Add security severity for vulnerability findings
         severity = f.get("severity", "")
@@ -171,15 +188,16 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
             result["properties"] = result.get("properties", {})
             result["properties"]["claude_finding"] = extras
             
-        # Add fingerprint metadata to properties for debugging
-        result["properties"] = result.get("properties", {})
-        result["properties"]["claude_fingerprint_info"] = {
-            "generated_at": timestamp,
-            "scanner_version": "claude-security-scanner-v1.0",
-            "fingerprint_method": "claude-scanner/v1",
-            "is_existing_alert": is_existing,
-            "fingerprint_source": "existing_alert" if is_existing else "new_generation"
-        }
+        # Add fingerprint metadata to properties for debugging (skip in GitHub-compatible mode)
+        if not use_github_compatible_format:
+            result["properties"] = result.get("properties", {})
+            result["properties"]["claude_fingerprint_info"] = {
+                "generated_at": timestamp,
+                "scanner_version": "claude-security-scanner-v1.0",
+                "fingerprint_method": "claude-scanner/v1",
+                "is_existing_alert": is_existing,
+                "fingerprint_source": "existing_alert" if is_existing else "new_generation"
+            }
 
         results.append(result)
 
@@ -211,6 +229,6 @@ def findings_to_sarif(findings: List[Dict[str, Any]],
 
     return sarif
 
-def findings_to_sarif_string(findings: List[Dict[str, Any]], tool_name: str = "Claude Code Security Reviewer", fingerprint_manager = None) -> str:
-    sarif = findings_to_sarif(findings, tool_name=tool_name, fingerprint_manager=fingerprint_manager)
+def findings_to_sarif_string(findings: List[Dict[str, Any]], tool_name: str = "Claude Code Security Reviewer", fingerprint_manager = None, use_github_compatible_format: bool = False) -> str:
+    sarif = findings_to_sarif(findings, tool_name=tool_name, fingerprint_manager=fingerprint_manager, use_github_compatible_format=use_github_compatible_format)
     return json.dumps(sarif, indent=2, ensure_ascii=False)
